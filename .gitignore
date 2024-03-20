@@ -1,6 +1,7 @@
 _docs/
 _proc/
 
+*.code-workspace
 *.bak
 .gitattributes
 .last_checked
@@ -149,3 +150,6 @@ checklink/cookies.txt
 
 # Quarto
 .quarto
+
+# User custom
+data_sets/*
