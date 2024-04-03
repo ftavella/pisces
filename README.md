@@ -24,13 +24,7 @@ include new models, datasets, and evaluation metrics.
 
 ## Installation
 
-You can install this package from PyPi using:
-
-``` sh
-pip install pisces
-```
-
-You can alternatively clone this repository and install the package
+We hope to make Pisces available on PyPi, but for the time being you clone this repository and install the package
 locally using:
 
 ``` sh
