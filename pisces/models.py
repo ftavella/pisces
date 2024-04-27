@@ -179,10 +179,15 @@ class SGDLogisticRegression(SleepWakeClassifier):
             try:
                 X_folded = self._fold(X)
                 y_prepped, sample_weights = self._prepare_labels(y)
-                if (X_folded.shape[0] != y_prepped.shape[0]) \
-                    or (X_folded.shape[0] == 0) \
+                if (X_folded.shape[0] == 0) \
                     or (y_prepped.shape[0] == 0):
                     continue
+                if (X_folded.shape[0] != y_prepped.shape[0]):
+                    # trim to match
+                    smaller = min(X_folded.shape[0], y_prepped.shape[0])
+                    X_folded = X_folded[:smaller]
+                    y_prepped = y_prepped[:smaller]
+                    sample_weights = sample_weights[:smaller]
                 training.append((X_folded, y_prepped, sample_weights))
             except Exception as e:
                 print(f"Error folding or trimming data: {e}")

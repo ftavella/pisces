@@ -230,11 +230,11 @@ def build_ActiGraph_official(time_xyz, axis: int = 3) -> Tuple[np.ndarray, np.nd
     return times, counts
 
 # %% ../nbs/00_utils.ipynb 13
-from typing import List
+from typing import Any, List
 from matplotlib import pyplot as plt
 import numpy as np
 
-def plot_scores_CDF(scores: List[float], ax: plt.Axes = None):
+def plot_scores_CDF(scores: List[float], ax: plt.Axes = None, label: str = None, color: str = None):
     """Plot the cumulative dist function (CDF) of the scores."""
     # plt.figure(figsize=(20, 10))
     if ax is None:
@@ -243,19 +243,33 @@ def plot_scores_CDF(scores: List[float], ax: plt.Axes = None):
     _ = ax.hist(scores,
                 cumulative=True,
                 density=True,
-                bins=100)
+                bins=100,
+                label=label,
+                color=color,)
 
 
-def plot_scores_PDF(scores: List[float], ax: plt.Axes = None):
+def plot_scores_PDF(
+        scores: List[float], 
+        ax: plt.Axes = None, 
+        label: str = None, 
+        hist_color: str = None, 
+        mean_color: str = 'tab:orange', 
+        alpha: float = 1.0
+        ):
     """Plot the probability dist function (PDF) of the scores."""
     ax_ = ax
     if ax is None:
         _, ax_ = plt.subplots()
     ax_.set_xlim(0, 1)
-    _ = ax_.hist(scores, bins=20)
+    _ = ax_.hist(scores, bins=20,
+                density=True,   
+                label=label,
+                color=hist_color,
+                alpha=alpha,
+                )
 
     # plot the mean as a vertical 'tab:orange' line
-    ax_.axvline(np.mean(scores), color='tab:orange', linestyle='--', label=f"Mean: {np.mean(scores):.3f}")
+    ax_.axvline(np.mean(scores), color=mean_color, linestyle='--', label=f"Mean: {np.mean(scores):.3f}")
     if ax is None:
         ax_.legend()
 
