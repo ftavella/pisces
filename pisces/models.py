@@ -17,7 +17,7 @@ import polars as pl
 from numpy.lib.stride_tricks import as_strided
 from .data_sets import DataSetObject
 
-def psg_to_sleep_wake(psg: pl.DataFrame) -> np.array:
+def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     # map all positive classes to 1 (sleep)
     # retain all 0 (wake) and -1 (mask) classes
     return np.where(psg[:, 1] > 0, 1, psg[:, 1])
@@ -178,7 +178,7 @@ class SGDLogisticRegression(SleepWakeClassifier):
         for X, y in training_iterator:
             try:
                 X_folded = self._fold(X)
-                y_prepped, sample_weights = self._prepare_labels(y)
+                (y_prepped, sample_weights) = self._prepare_labels(y)
                 if (X_folded.shape[0] == 0) \
                     or (y_prepped.shape[0] == 0):
                     continue
@@ -216,7 +216,7 @@ class SGDLogisticRegression(SleepWakeClassifier):
     def predict_probabilities(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return self.model.predict_proba(self._input_preprocessing(sample_X))
     
-    def _fold(self, input_X: np.ndarray | pl.DataFrame) -> np.array:
+    def _fold(self, input_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         if isinstance(input_X, pl.DataFrame):
             input_X = input_X.to_numpy()
         return rolling_window(input_X, self.input_dim)
