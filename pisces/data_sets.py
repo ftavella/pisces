@@ -359,6 +359,7 @@ from numpy.lib.stride_tricks import as_strided
 from .data_sets import DataSetObject
 
 def mask_psg_from_accel(psg: np.ndarray, accel: np.ndarray, psg_epoch: int = 30, accel_sample_rate: float | None = None) -> np.ndarray:
+    print("masking")
 
     acc_last_index = 0
     acc_next_index = acc_last_index
@@ -398,6 +399,11 @@ def mask_psg_from_accel(psg: np.ndarray, accel: np.ndarray, psg_epoch: int = 30,
         acc_last_index = acc_next_index
     
     psg[np.array(psg_gap_indices), 1] = -1
+
+    if n_gaps := len(psg_gap_indices):
+        print(f"Masked {n_gaps} PSG epochs")
+    else:
+        print("No masking done")
 
     return psg
 
@@ -462,12 +468,19 @@ def psg_to_WLDM(psg: pl.DataFrame) -> np.ndarray:
             3
         ])
 
-def get_activity_X_PSG_y(data_set: DataSetObject, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
+def get_activity_X_PSG_y(data_set: DataSetObject, id: str, masking: bool = True) -> Tuple[np.ndarray, np.ndarray] | None:
     activity_0 = data_set.get_feature_data("activity", id)
     psg_0 = data_set.get_feature_data("psg", id)
 
     if activity_0 is None or psg_0 is None:
         return None
+
+    if masking:
+        accel = data_set.get_feature_data("accelerometer", id)
+        if accel is not None:
+            psg_0 = mask_psg_from_accel(psg_0, accel)
+        else:
+            warnings.warn(f"No accelerometer found for {id}, this is required for masking.")
 
     # trim the activity and psg data to both end when the 0th column (time) of either ends
     end_time = min(activity_0[-1, 0], psg_0[-1, 0])
