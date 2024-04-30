@@ -120,7 +120,7 @@ class SGDLogisticRegression(SleepWakeClassifier):
         ys = ys[selector]
         weights = weights[selector]
 
-        self.pipeline.fit(Xs, ys)
+        self.pipeline.fit(Xs, ys, sgdclassifier__sample_weight=weights)
     
     def _input_preprocessing(self, X: np.ndarray) -> np.ndarray:
         return self.scaler.transform(self._fold(X))
@@ -262,8 +262,48 @@ class MOResUNetPretrained(SleepWakeClassifier):
               examples_y: List[pl.DataFrame] = [], 
               pairs_Xy: List[Tuple[pl.DataFrame, pl.DataFrame]] = [], 
               epochs: int = 10, batch_size: int = 32):
-        """Training is not implemented yet for this model. You can run inference, though, using `predict_probabilities` and `predict`."""
-        pass
+        """
+        Trains the associated Keras model.
+        """
+        if examples_X or examples_y:
+            assert len(examples_X) == len(examples_y)
+        if pairs_Xy:
+            assert not examples_X
+        
+        training = []
+        training_iterator = iter(pairs_Xy) if pairs_Xy else zip(examples_X, examples_y)
+        for X, y in training_iterator:
+            try:
+                # X_folded = self._fold(X)
+                # (y_prepped, sample_weights) = self._prepare_labels(y)
+                # if (X_folded.shape[0] == 0) \
+                #     or (y_prepped.shape[0] == 0):
+                #     continue
+                # if (X_folded.shape[0] != y_prepped.shape[0]):
+                #     # trim to match
+                #     smaller = min(X_folded.shape[0], y_prepped.shape[0])
+                #     X_folded = X_folded[:smaller]
+                #     y_prepped = y_prepped[:smaller]
+                #     sample_weights = sample_weights[:smaller]
+                sample_weights = y >= 0
+                training.append((X, y, sample_weights))
+            except Exception as e:
+                print(f"Error folding or trimming data: {e}")
+                continue
+        
+        Xs = [X for X, _, _ in training]
+        ys = [y for _, y, _ in training]
+        weights = [w for _, _, w in training]
+        Xs = np.concatenate(Xs, axis=0)
+        ys = np.concatenate(ys, axis=0)
+        weights = np.concatenate(weights, axis=0)
+
+        selector = ys >= 0
+        Xs = Xs[selector]
+        ys = ys[selector]
+        weights = weights[selector]
+
+        self.tf_model.fit(Xs, ys)
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
