@@ -223,6 +223,34 @@ class DataSetObject:
         self._feature_map: DefaultDict[str, Dict[str, str]] = defaultdict(dict)
         self._feature_cache: DefaultDict[str, Dict[str, pl.DataFrame]] = defaultdict(dict)
     
+    @staticmethod
+    def from_dict(data: Dict[str, Dict[str, pl.DataFrame]]) -> 'DataSetObject':
+        """
+        Instantiates a DataSetObject given a dict mapping 
+        {
+            feature_name: {
+                id: pl.DataFrame
+            }
+        }
+        """
+        data_mock = DataSetObject("mock", Path("."))
+        data_mock._feature_cache = data
+        # when data = {"feature_1": {...}, "feature_2": {...}, ...}
+        # data.keys() = ["feature_1", "feature_2", ...]
+        data_mock._feature_map = {
+            k: {
+                k2: "FROM_DICTIONARY" 
+                for k2 in v.keys()
+            } 
+            for k, v in data.items()
+        }
+        data_mock.ids = list(set(
+            id for feature in data.values()
+            for id in feature.keys()
+        ))
+
+        return data_mock
+    
     @property
     def features(self) -> List[str]:
         return list(self._feature_map.keys())
@@ -231,12 +259,6 @@ class DataSetObject:
         return f"{self.name}: {self.path}"
 
     def get_feature_data(self, feature: str, id: str) -> pl.DataFrame | None:
-        if feature not in self.features:
-            warnings.warn(f"Feature {feature} not found in {self.name}. Returning None.")
-            return None
-        if id not in self.ids:
-            warnings.warn(f"ID {id} not found in {self.name}")
-            return None
         if (df := self._feature_cache[feature].get(id)) is None:
             file = self.get_filename(feature, id)
             if not file:
@@ -259,12 +281,10 @@ class DataSetObject:
     def get_filename(self, feature: str, id: str) -> Path | None:
         feature_ids = self._feature_map.get(feature)
         if feature_ids is None:
-            # raise ValueError(f"Feature {feature_ids} not found in {self.name}")
             print(f"Feature {feature_ids} not found in {self.name}")
             return None
         file = feature_ids.get(id)
         if file is None:
-            # raise ValueError
             print(f"ID {id} not found in {self.name}")
             return None
         return self.get_feature_path(feature)\
