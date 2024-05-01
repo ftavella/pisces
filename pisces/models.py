@@ -32,10 +32,6 @@ class SleepClassifierMode(Enum):
 class SleepWakeClassifier(abc.ABC):
     """
     """
-    @property
-    @abc.abstractmethod
-    def mode(self) -> SleepClassifierMode:
-        pass
     @abc.abstractmethod
     def get_needed_X_y(self, data_set: DataSetObject, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         pass
