@@ -435,20 +435,22 @@ class LeaveOneOutSplitter(SplitMaker):
 
 def run_split(train_indices, 
               preprocessed_data_set: List[Tuple[np.ndarray, np.ndarray]], 
-              swc: SleepWakeClassifier) -> SleepWakeClassifier:
+              swc: SleepWakeClassifier,
+              epochs: int) -> SleepWakeClassifier:
     training_pairs = [
         preprocessed_data_set[i][0]
         for i in train_indices
         if preprocessed_data_set[i][0] is not None
     ]
-    swc.train(pairs_Xy=training_pairs)
+    swc.train(pairs_Xy=training_pairs, epochs=epochs)
 
     return swc
 
 def run_splits(split_maker: SplitMaker, w: DataSetObject, 
                swc_class: Type[SleepWakeClassifier], 
                exclude: List[str] = [],
-               preprocessed_data: List[np.ndarray] | None = None) -> Tuple[
+               preprocessed_data: List[np.ndarray] | None = None,
+               epochs: int = 10) -> Tuple[
         List[SleepWakeClassifier], 
         List[np.ndarray],
         List[List[List[int]]]]:
@@ -468,7 +470,8 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
             continue
         model = run_split(train_indices=train_index,
                         preprocessed_data_set=preprocessed_data,
-                        swc=swc_class())
+                        swc=swc_class(),
+                        epochs=epochs)
         split_models.append(model)
         test_indices.append(test_index[0])
         splits.append([train_index, test_index])
