@@ -52,7 +52,7 @@ class SGDLogisticRegression(SleepWakeClassifier):
     def __init__(self, lr: float = 0.15, input_dim: int = 11, output_dim: int = 1):
         self.model = SGDClassifier(loss='log_loss',
                                    learning_rate='adaptive',
-                                   penalty='l1',
+                                   penalty='l2',
                                    eta0=lr,
                                    class_weight='balanced',
                                    warm_start=True)
@@ -120,7 +120,9 @@ class SGDLogisticRegression(SleepWakeClassifier):
         ys = ys[selector]
         weights = weights[selector]
 
-        self.pipeline.fit(Xs, ys, sgdclassifier__sample_weight=weights)
+        # self.pipeline.fit(Xs, ys, sgdclassifier__sample_weight=weights)
+        # balance weights is on for "sgdclassifier" step
+        self.pipeline.fit(Xs, ys)
     
     def _input_preprocessing(self, X: np.ndarray) -> np.ndarray:
         return self.scaler.transform(self._fold(X))
