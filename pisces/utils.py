@@ -254,6 +254,7 @@ def plot_scores_PDF(
         label: str = None, 
         hist_color: str = None, 
         mean_color: str = 'tab:orange', 
+        stdev_color: str = 'gray', 
         alpha: float = 1.0
         ):
     """Plot the probability dist function (PDF) of the scores."""
@@ -269,7 +270,11 @@ def plot_scores_PDF(
                 )
 
     # plot the mean as a vertical 'tab:orange' line
-    ax_.axvline(np.mean(scores), color=mean_color, linestyle='--', label=f"Mean: {np.mean(scores):.3f}")
+    mean_score = np.mean(scores)
+    ax_.axvline(mean_score, color=mean_color, linestyle='--', label=f"Mean: {mean_score:.3f}")
+    stdev_score = np.std(scores)
+    ax_.axvline(mean_score - stdev_score, color=stdev_color, linestyle='--', label=f"Std. Dev: {stdev_score:.3f}")
+    ax_.axvline(mean_score + stdev_score, color=stdev_color, linestyle='--')
     if ax is None:
         ax_.legend()
 
