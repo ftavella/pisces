@@ -168,7 +168,6 @@ from .utils import split_analysis
 
 
 class MOResUNetPretrained(SleepWakeClassifier):
-    tf_model = load_saved_keras()
     config = MO_PREPROCESSING_CONFIG
 
     def __init__(
@@ -182,7 +181,15 @@ class MOResUNetPretrained(SleepWakeClassifier):
             sampling_hz (int, optional): The sampling frequency in Hz. Defaults to FS.
         """
         super().__init__()
+        # self.tf_model = load_saved_keras()
+        self._tf_model = None
         self.sampling_hz = sampling_hz
+    
+    @property
+    def tf_model(self) -> keras.Model:
+        if self._tf_model is None:
+            self._tf_model = load_saved_keras()
+        return self._tf_model
 
     def prepare_set_for_training(self, 
                                  data_set: DataSetObject, ids: List[str] | None = None,
