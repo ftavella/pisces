@@ -271,7 +271,8 @@ class MOResUNetPretrained(SleepWakeClassifier):
               examples_X: List[pl.DataFrame] = [], 
               examples_y: List[pl.DataFrame] = [], 
               pairs_Xy: List[Tuple[pl.DataFrame, pl.DataFrame]] = [], 
-              epochs: int = 10, batch_size: int = 2):
+              epochs: int = 10, 
+              batch_size: int = 1):
         """
         Trains the associated Keras model.
         """
@@ -306,7 +307,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         weights = np.concatenate(weights, axis=0)
 
         self.tf_model.compile(
-            optimizer=keras.optimizers.RMSprop(), 
+            optimizer=keras.optimizers.RMSprop(learning_rate=1e-5), 
             loss=keras.losses.SparseCategoricalCrossentropy())
         self.tf_model.fit(
             Xs_c, 
@@ -314,7 +315,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
             batch_size=batch_size,
             epochs=epochs,
             sample_weight=weights,
-            validation_split=0.2)
+            validation_split=0.1)
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
