@@ -173,6 +173,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
     def __init__(
         self,
         sampling_hz: int = FS,
+        tf_model: keras.Model = None,
     ) -> None:
         """
         Initialize the MOResUNetPretrained classifier.
@@ -182,7 +183,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         """
         super().__init__()
         # self.tf_model = load_saved_keras()
-        self._tf_model = None
+        self._tf_model = tf_model
         self.sampling_hz = sampling_hz
     
     @property
