@@ -317,13 +317,15 @@ class MOResUNetPretrained(SleepWakeClassifier):
         self.tf_model.compile(
             optimizer=keras.optimizers.RMSprop(learning_rate=1e-5), 
             loss=keras.losses.SparseCategoricalCrossentropy())
-        self.tf_model.fit(
+        fit_result = self.tf_model.fit(
             Xs_c, 
             ys_c * weights,
             batch_size=batch_size,
             epochs=epochs,
             sample_weight=weights,
             validation_split=0.1)
+        
+        return fit_result
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
@@ -451,9 +453,9 @@ def run_split(train_indices,
         for i in train_indices
         if preprocessed_data_set[i][0] is not None
     ]
-    swc.train(pairs_Xy=training_pairs, epochs=epochs)
+    train_result = swc.train(pairs_Xy=training_pairs, epochs=epochs)
 
-    return swc
+    return swc, train_result
 
 def run_splits(split_maker: SplitMaker, w: DataSetObject, 
                swc_class: Type[SleepWakeClassifier], 
