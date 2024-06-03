@@ -316,7 +316,10 @@ class MOResUNetPretrained(SleepWakeClassifier):
 
         self.tf_model.compile(
             optimizer=keras.optimizers.RMSprop(learning_rate=1e-5), 
-            loss=keras.losses.SparseCategoricalCrossentropy())
+            loss=keras.losses.SparseCategoricalCrossentropy(),
+            metrics=[keras.metrics.SparseCategoricalAccuracy()],
+            weighted_metrics=[],
+            )
         fit_result = self.tf_model.fit(
             Xs_c, 
             ys_c * weights,
@@ -479,7 +482,7 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
     for train_index, test_index in tqdm(split_maker.split(preprocessed_data)):
         if preprocessed_data[test_index[0]][0] is None:
             continue
-        model = run_split(train_indices=train_index,
+        model, _ = run_split(train_indices=train_index,
                         preprocessed_data_set=preprocessed_data,
                         swc=swc_class(),
                         epochs=epochs)
