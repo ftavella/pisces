@@ -202,7 +202,8 @@ class MOResUNetPretrained(SleepWakeClassifier):
 
     def prepare_set_for_training(self, 
                                  data_set: DataSetObject, ids: List[str] | None = None,
-                                 max_workers: int | None = None 
+                                 max_workers: int | None = None,
+                                 wldm_mapping: dict = DEFAULT_WLDM_MAPPING,
                                  ) -> List[Tuple[np.ndarray, np.ndarray] | None]:
         """
         Prepare the data set for training.
@@ -210,6 +211,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Args:
             data_set (DataSetObject): The data set to prepare for training.
             ids (List[str], optional): The IDs to prepare. Defaults to None.
+            wlcm_mapping (dict, optional): The mapping of PSG stages to WLDM stages. Defaults to DEFAULT_WLDM_MAPPING.
             max_workers (int, optional): The number of workers to use for parallel processing. Defaults to None, which uses all available cores. Setting to a negative number leaves that many cores unused. For example, if my machine has 4 cores and I set max_workers to -1, then 3 = 4 - 1 cores will be used; if max_workers=-3 then 1 = 4 - 3 cores are used.
 
         Returns:
@@ -220,7 +222,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         results = []
         
         if ids:
-            data_set_and_ids = [(data_set, id) for id in ids]
+            data_set_and_ids = [(data_set, id, wldm_mapping) for id in ids]
             # Get the number of available CPU cores
             num_cores = multiprocessing.cpu_count()
             workers_to_use = max_workers if max_workers is not None else num_cores
