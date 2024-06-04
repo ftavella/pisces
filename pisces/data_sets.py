@@ -417,28 +417,17 @@ def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     """
     return np.where(psg[:, 1] > 0, 1, psg[:, 1])
 
-def to_WLDM(x: float) -> int:
-    if x < 0:
-        return -1
-    if x == 0:
-        return 0
-    if x < 3:
-        return 1
-    if x < 5:
-        return 2
-    return 3
+def to_WLDM(x: float, mapping: dict) -> int:
+    for key, value in mapping.items():
+        if x in key:
+            return value
+    return x
 
 vec_to_WLDM = np.vectorize(to_WLDM)
 
-def psg_to_WLDM(psg: pl.DataFrame) -> np.ndarray:
-    """
-    * map all positive classes as follows:
-        - 1, 2 => 1 (light sleep)
-        - 3, 4 => 2 (deep sleep)
-        - 5 => 3 (REM)
-    * retain all 0 (wake) and -1 (mask) classes
-    """
-    return vec_to_WLDM(psg[:, 1].to_numpy())
+def psg_to_WLDM(psg: pl.DataFrame, mapping: dict) -> np.ndarray:
+    # Note: Define mapping keys as ranges, not as individual values
+    return vec_to_WLDM(psg[:, 1].to_numpy(), mapping)
 
 def get_activity_X_PSG_y(data_set: DataSetObject, id: str, masking: bool = True) -> Tuple[np.ndarray, np.ndarray] | None:
     activity_0 = data_set.get_feature_data("activity", id)
@@ -475,7 +464,7 @@ def rolling_window(arr, window_size):
     arr_strided = as_strided(arr, shape=(strided_axis_0, window_size), strides=(arr.strides[0], arr.strides[0]))
     return arr_strided
 
-# %% ../nbs/01_data_sets.ipynb 22
+# %% ../nbs/01_data_sets.ipynb 23
 import polars as pl
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
