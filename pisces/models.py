@@ -472,7 +472,8 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
                swc_class: Type[SleepWakeClassifier], 
                exclude: List[str] = [],
                preprocessed_data: List[np.ndarray] | None = None,
-               epochs: int = 10) -> Tuple[
+               epochs: int = 10,
+               wldm_mapping: dict = DEFAULT_WLDM_MAPPING) -> Tuple[
         List[SleepWakeClassifier], 
         List[np.ndarray],
         List[List[List[int]]]]:
@@ -483,7 +484,7 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
         i for i in w.ids if i not in exclude
     ]
 
-    preprocessed_data = [(swc_class().get_needed_X_y(w, i), i) for i in ids_to_split] \
+    preprocessed_data = [(swc_class().get_needed_X_y(w, i, wldm_mapping), i) for i in ids_to_split] \
         if preprocessed_data is None else preprocessed_data
 
     # for train_index, test_index in tqdm(split_maker.split(ids_to_split)):
@@ -504,7 +505,7 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
         #     split_models.append(model)
         #     test_indices.append(test_index[0])
         #     splits.append([train_index, test_index])
-        # except Exception as e:
+    # except Exception as e:
         #     print(f"Training failed for {ids_to_split[test_index[0]]}")
     
     return split_models, preprocessed_data, splits
