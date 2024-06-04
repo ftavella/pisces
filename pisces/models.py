@@ -164,6 +164,7 @@ class SGDLogisticRegression(SleepWakeClassifier):
 
 # %% ../nbs/02_models.ipynb 11
 from functools import partial
+from itertools import repeat
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import warnings
@@ -222,7 +223,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         results = []
         
         if ids:
-            data_set_and_ids = [(data_set, id, wldm_mapping) for id in ids]
+            data_set_and_ids = [(data_set, id) for id in ids]
             # Get the number of available CPU cores
             num_cores = multiprocessing.cpu_count()
             workers_to_use = max_workers if max_workers is not None else num_cores
@@ -243,7 +244,8 @@ class MOResUNetPretrained(SleepWakeClassifier):
                 results = list(
                     executor.map(
                         self.get_needed_X_y_from_pair, 
-                        data_set_and_ids
+                        data_set_and_ids,
+                        repeat(wldm_mapping),
                     ))
         else:
             warnings.warn("No IDs found in the data set.")
