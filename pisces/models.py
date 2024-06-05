@@ -320,13 +320,14 @@ class MOResUNetPretrained(SleepWakeClassifier):
             optimizer=keras.optimizers.RMSprop(learning_rate=1e-5), 
             loss=keras.losses.SparseCategoricalCrossentropy(),
             weighted_metrics=[])
-        self.tf_model.fit(
+        fit_result = self.tf_model.fit(
             Xs_c, 
             ys_c * weights,
             batch_size=batch_size,
             epochs=epochs,
             sample_weight=weights,
             validation_split=0.1)
+        return fit_result
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
@@ -454,9 +455,9 @@ def run_split(train_indices,
         for i in train_indices
         if preprocessed_data_set[i][0] is not None
     ]
-    swc.train(pairs_Xy=training_pairs, epochs=epochs)
+    train_result = swc.train(pairs_Xy=training_pairs, epochs=epochs)
 
-    return swc
+    return swc, train_result
 
 def run_splits(split_maker: SplitMaker, w: DataSetObject, 
                swc_class: Type[SleepWakeClassifier], 
@@ -472,6 +473,7 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
     ids_to_split = [
         i for i in w.ids if i not in exclude
     ]
+    train_results = []
 
     preprocessed_data = [(swc_class().get_needed_X_y(w, i), i) for i in ids_to_split] \
         if preprocessed_data is None else preprocessed_data
@@ -480,13 +482,14 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
     for train_index, test_index in tqdm(split_maker.split(preprocessed_data)):
         if preprocessed_data[test_index[0]][0] is None:
             continue
-        model = run_split(train_indices=train_index,
-                        preprocessed_data_set=preprocessed_data,
-                        swc=swc_class(),
-                        epochs=epochs)
+        model, train_result = run_split(train_indices=train_index, 
+                                        preprocessed_data_set=preprocessed_data, 
+                                        swc=swc_class(), 
+                                        epochs=epochs)
         split_models.append(model)
         test_indices.append(test_index[0])
         splits.append([train_index, test_index])
+        train_results.append(train_result)
         # try:
         #     model = run_split(train_indices=train_index,
         #                     preprocessed_data_set=preprocessed_data,
@@ -497,6 +500,6 @@ def run_splits(split_maker: SplitMaker, w: DataSetObject,
         # except Exception as e:
         #     print(f"Training failed for {ids_to_split[test_index[0]]}")
     
-    return split_models, preprocessed_data, splits
+    return split_models, preprocessed_data, splits, train_results
 
 
