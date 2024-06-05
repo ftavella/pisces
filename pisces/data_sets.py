@@ -435,11 +435,16 @@ def to_WLDM(x: float, N4: bool=True) -> int:
 
 vec_to_WLDM = np.vectorize(to_WLDM)
 
-def psg_to_WLDM(psg: pl.DataFrame, N4) -> np.ndarray:
+def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
     """
     * map all positive classes as follows:
+    If N4 is True:
         - 1, 2 => 1 (light sleep)
         - 3, 4 => 2 (deep sleep)
+        - 5 => 3 (REM)
+    If N4 is False:
+        - 1, 2 => 1 (light sleep)
+        - 3 => 2 (deep sleep)
         - 5 => 3 (REM)
     * retain all 0 (wake) and -1 (mask) classes
     """
