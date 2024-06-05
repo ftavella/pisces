@@ -417,20 +417,25 @@ def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     """
     return np.where(psg[:, 1] > 0, 1, psg[:, 1])
 
-def to_WLDM(x: float) -> int:
+def to_WLDM(x: float, N4: bool=True) -> int:
     if x < 0:
         return -1
     if x == 0:
         return 0
     if x < 3:
         return 1
-    if x < 5:
-        return 2
-    return 3
+    if N4:
+        if x < 5:
+            return 2
+        return 3
+    else:
+        if x < 4:
+            return 2
+        return 3
 
 vec_to_WLDM = np.vectorize(to_WLDM)
 
-def psg_to_WLDM(psg: pl.DataFrame) -> np.ndarray:
+def psg_to_WLDM(psg: pl.DataFrame, N4) -> np.ndarray:
     """
     * map all positive classes as follows:
         - 1, 2 => 1 (light sleep)
@@ -438,7 +443,7 @@ def psg_to_WLDM(psg: pl.DataFrame) -> np.ndarray:
         - 5 => 3 (REM)
     * retain all 0 (wake) and -1 (mask) classes
     """
-    return vec_to_WLDM(psg[:, 1].to_numpy())
+    return vec_to_WLDM(psg[:, 1].to_numpy(), N4)
 
 def get_activity_X_PSG_y(data_set: DataSetObject, id: str, masking: bool = True) -> Tuple[np.ndarray, np.ndarray] | None:
     activity_0 = data_set.get_feature_data("activity", id)

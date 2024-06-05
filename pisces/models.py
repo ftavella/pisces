@@ -194,7 +194,8 @@ class MOResUNetPretrained(SleepWakeClassifier):
 
     def prepare_set_for_training(self, 
                                  data_set: DataSetObject, ids: List[str] | None = None,
-                                 max_workers: int | None = None 
+                                 max_workers: int | None = None,
+                                 N4: bool = True,
                                  ) -> List[Tuple[np.ndarray, np.ndarray] | None]:
         """
         Prepare the data set for training.
@@ -212,7 +213,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         results = []
         
         if ids:
-            data_set_and_ids = [(data_set, id) for id in ids]
+            data_set_and_ids = [(data_set, id, N4) for id in ids]
             # Get the number of available CPU cores
             num_cores = multiprocessing.cpu_count()
             workers_to_use = max_workers if max_workers is not None else num_cores
@@ -250,11 +251,11 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Returns:
             Tuple[np.ndarray, np.ndarray] | None: The X and y data as a tuple, or None if an error occurred.
         """
-        data_set, id = pair
+        data_set, id, N4 = pair
         print(f"getting needed X, y for {id}")
-        return self.get_needed_X_y(data_set, id)
+        return self.get_needed_X_y(data_set, id, N4)
     
-    def get_needed_X_y(self, data_set: DataSetObject, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
+    def get_needed_X_y(self, data_set: DataSetObject, id: str, N4) -> Tuple[np.ndarray, np.ndarray] | None:
         accelerometer = data_set.get_feature_data("accelerometer", id)
         psg = data_set.get_feature_data("psg", id)
 
@@ -273,7 +274,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         mirrored_spectro = self._input_preprocessing(accelerometer)
 
         # return mirrored_spectro, psg_to_sleep_wake(psg)
-        return mirrored_spectro, psg_to_WLDM(psg)
+        return mirrored_spectro, psg_to_WLDM(psg, N4)
 
     def train(self, 
               examples_X: List[pl.DataFrame] = [], 
