@@ -318,7 +318,8 @@ class MOResUNetPretrained(SleepWakeClassifier):
 
         self.tf_model.compile(
             optimizer=keras.optimizers.RMSprop(learning_rate=1e-5), 
-            loss=keras.losses.SparseCategoricalCrossentropy())
+            loss=keras.losses.SparseCategoricalCrossentropy(),
+            weighted_metrics=[])
         self.tf_model.fit(
             Xs_c, 
             ys_c * weights,
