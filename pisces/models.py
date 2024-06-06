@@ -270,7 +270,9 @@ class MOResUNetPretrained(SleepWakeClassifier):
         stop_time = min(accelerometer[:, 0].max(), psg[:, 0].max())
         accelerometer = accelerometer.filter(accelerometer[:, 0] <= stop_time)
         psg = psg.filter(psg[:, 0] <= stop_time)
-
+        start_time = max(accelerometer[:, 0].min(), psg[:, 0].min())
+        accelerometer = accelerometer.filter(accelerometer[:, 0] >= start_time)
+        psg = psg.filter(psg[:, 0] >= start_time)
 
         mirrored_spectro = self._input_preprocessing(accelerometer)
 
