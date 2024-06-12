@@ -15,10 +15,6 @@ on:
         description: 'Version of python to set up'
         required: false
         default: '3.10'
-      ghtoken:
-        description: 'GitHub token'
-        default: ${{ github.token }}
-        required: false
       torch_cpu:
         description: "Install PyTorch CPU instead of PyTorch Cuda.  Has no effect if PyTorch isn't a requirement.  Enabled by defaut."
         required: false
@@ -64,7 +60,7 @@ jobs:
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ inputs.ghtoken }}
+          github_token: ${{ github.token }}
           force_orphan: true
           publish_dir: ./_docs
           # The following lines assign commit authorship to the official GH-Actions bot for deploys to `gh-pages` branch.
