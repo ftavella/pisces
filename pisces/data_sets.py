@@ -2,13 +2,15 @@
 
 # %% auto 0
 __all__ = ['LOG_LEVEL', 'vec_to_WLDM', 'SimplifiablePrefixTree', 'IdExtractor', 'DataSetObject', 'psg_to_sleep_wake', 'to_WLDM',
-           'psg_to_WLDM', 'ModelOutputType', 'PSGType', 'ModelInput', 'ModelInput1D', 'ModelInputSpectogram',
+           'psg_to_WLDM', 'ModelOutputType', 'PSGType', 'ModelInput', 'ModelInput1D', 'ModelInputSpectrogram',
            'find_overlapping_time_section', 'ProcessedData']
 
 # %% ../nbs/01_data_sets.ipynb 4
 from pathlib import Path
 from enum import Enum, auto
+from functools import partial
 from typing import Dict, List, Tuple
+from .mads_olsen_support import MO_PREPROCESSING_CONFIG, MO_UNET_CONFIG
 
 # %% ../nbs/01_data_sets.ipynb 6
 from copy import deepcopy
@@ -391,24 +393,10 @@ class PSGType(Enum):
 class ModelInput:
     def __init__(self,
                  input_features: List[str] | str,
+                 input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
                  ):
         if isinstance(input_features, str):
             input_features = [input_features]
-        self.input_features = input_features
-
-class ModelInput1D(ModelInput):
-    def __init__(self,
-                 input_features: List[str] | str,
-                 input_window_size: int | float, # Window size (in seconds) for the input data. Window will be centered around the time point for which the model is making a prediction
-                 input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
-                 ):
-        super().__init__(input_features)
-        # input_window_size
-        if not isinstance(input_window_size, (int, float)):
-            raise ValueError("input_window_size must be an int or a float")
-        else:
-            if input_window_size <= 0:
-                raise ValueError("input_window_size must be greater than 0")
         # input_sampling_hz
         if not isinstance(input_sampling_hz, (int, float)):
             raise ValueError("input_sampling_hz must be an int or a float")
@@ -416,8 +404,24 @@ class ModelInput1D(ModelInput):
             if input_sampling_hz <= 0:
                 raise ValueError("input_sampling_hz must be greater than 0")
 
-        self.input_window_size = float(input_window_size)
+        self.input_features = input_features
         self.input_sampling_hz = float(input_sampling_hz)
+
+class ModelInput1D(ModelInput):
+    def __init__(self,
+                 input_features: List[str] | str,
+                 input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
+                 input_window_size: int | float, # Window size (in seconds) for the input data. Window will be centered around the time point for which the model is making a prediction
+                 ):
+        super().__init__(input_features, input_sampling_hz)
+        # input_window_size
+        if not isinstance(input_window_size, (int, float)):
+            raise ValueError("input_window_size must be an int or a float")
+        else:
+            if input_window_size <= 0:
+                raise ValueError("input_window_size must be greater than 0")
+
+        self.input_window_size = float(input_window_size)
         # Number of samples for the input window of a single feature
         self.input_window_samples = int(self.input_window_size * self.input_sampling_hz)
         ## force it to be odd to have perfectly centered window
@@ -426,9 +430,14 @@ class ModelInput1D(ModelInput):
         # Dimension of the input data for the model
         self.model_input_dimension = int(len(input_features) * self. input_window_samples)
 
-class ModelInputSpectogram(ModelInput):
-    # variables specific to this case
-    pass
+class ModelInputSpectrogram(ModelInput):
+    def __init__(self,
+                 input_features: List[str] | str,
+                 input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
+                 spectrogram_preprocessing_config: Dict=MO_PREPROCESSING_CONFIG, # Steps in the preprocessing pipeline for getting a spectrogram from acceleration
+                 ):
+        super().__init__(input_features, input_sampling_hz)
+        self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
 # %% ../nbs/01_data_sets.ipynb 16
 def find_overlapping_time_section(
@@ -474,14 +483,17 @@ class ProcessedData:
             self.input_sampling_hz = model_input.input_sampling_hz
             self.input_window_samples = model_input.input_window_samples
             self.model_input_dimension = model_input.model_input_dimension
-        elif isinstance(model_input, ModelInputSpectogram):
-            raise NotImplementedError("Spectogram input type not yet supported")
+        elif isinstance(model_input, ModelInputSpectrogram):
+            self.spectrogram_preprocessing_config = model_input.spectrogram_preprocessing_config
+            raise NotImplementedError("Spectrogram input type not yet supported")
 
     def get_labels(self, id: str, start: int, end: int,
                    output_feature: str) -> pl.DataFrame | None:
         data = self.data_set.get_feature_data(output_feature, id)
         data = data.filter(data[:, 0] >= start)
         data = data.filter(data[:, 0] <= end)
+
+        #TODO: Add masking
 
         if self.output_type == ModelOutputType.SLEEP_WAKE:
             if output_feature == 'psg':
@@ -522,8 +534,9 @@ class ProcessedData:
 
     def get_1D_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         # Find overlapping time section
+        all_features = self.input_features + [self.output_feature]
         max_start, min_end = find_overlapping_time_section(self.data_set, 
-                                                           self.input_features,
+                                                           all_features,
                                                            id)
         # Get labels
         labels = self.get_labels(id, max_start, min_end, self.output_feature)
@@ -560,3 +573,75 @@ class ProcessedData:
         X = np.concatenate(interpolated_features, axis=1)
         y = filtered_labels[:, 1].to_numpy()
         return X, y
+    
+    def accelerometer_to_spectrogram(self, accelerometer: pl.DataFrame) -> np.ndarray:
+        """
+        Implementation by Mads Olsen at https://github.com/MADSOLSEN/SleepStagePrediction
+        with minor modifications.
+        """
+        if isinstance(accelerometer, pl.DataFrame):
+            acc = accelerometer.to_numpy()
+        else:
+            raise ValueError("accelerometer must be a polars DataFrame")
+
+        #TODO: Check if x is 0 or time is 0 for our case
+        x_ = acc[:, 0]
+        y_ = acc[:, 1]
+        z_ = acc[:, 2]
+
+        for step in self.spectrogram_preprocessing_config:
+            fn = eval(step["type"])  # convert string version to function in environment
+            fn_args = partial(
+                fn, **step["args"]
+            )  # fill in the args given, which must be everything besides numerical input
+
+            # apply
+            x_ = fn_args(x_)
+            y_ = fn_args(y_)
+            z_ = fn_args(z_)
+
+        spec = x_ + y_ + z_
+        spec /= 3.0
+
+        return spec
+
+    def mirror_spectrogram(self, spectrogram: np.ndarray) -> np.ndarray:
+        # We will copy the spectrogram to both channels, flipping it on channel 1
+        input_shape = (1, *MO_UNET_CONFIG['input_shape'])
+        inputs_len = input_shape[1]
+
+        mirrored = np.zeros(shape=input_shape, dtype=np.float32)
+        # We must do some careful work with indices to not overflow arrays
+        spec = spec[:inputs_len].astype(np.float32) # protect agains spec.len > input_shape
+
+        #! careful, order matters here. We first trim spec to make sure it'll fit into inputs,
+        # then compute the new length which we KNOW is <= inputs_len
+        spec_len = spec.shape[0]
+        # THEN we assign only as much inputs as spec covers
+        mirrored[0, : spec_len, :, 0] = spec # protect agains spec_len < input_shape
+        mirrored[0, : spec_len, :, 1] = spec[:, ::-1]
+
+        return mirrored
+
+    def get_spectrogram_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
+        # Find overlapping time section
+        all_features = self.input_features + [self.output_feature]
+        max_start, min_end = find_overlapping_time_section(self.data_set, 
+                                                           all_features,
+                                                           id)
+        # Get labels
+        labels = self.get_labels(id, max_start, min_end, self.output_feature)
+        y = labels[:, 1].to_numpy()
+        # Get spectrogram
+        if self.input_features != ['accelerometer']:
+            raise ValueError("Spectrogram input only supported for accelerometer data")
+
+        accelerometer = self.data_set.get_feature_data('accelerometer', id)
+        #TODO: fill_gaps_in_accelerometer_data
+        # accelerometer = fill_gaps_in_accelerometer_data(accelerometer, smooth=False, final_sampling_rate_hz=self.sampling_hz)
+
+        # Get spectrogram (mirrored)
+        spectrogram = self.accelerometer_to_spectrogram(accelerometer)
+        X = self.mirror_spectrogram(spectrogram)
+
+        return X, y 
