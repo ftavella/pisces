@@ -392,6 +392,9 @@ class ProcessedData:
         self.output_type = output_type
         # Calculate number of samples in the input window
         self.input_window_samples = int(input_window_size * input_sampling_hz)
+        ## force it to be odd to have perfectly centered window
+        if self.input_window_samples % 2 == 0:
+            self.input_window_samples += 1
         self.model_input_dimension = int(len(input_features) * self.input_window_samples)
 
     def get_labels(self, id: str, start: int, end: int,
@@ -409,8 +412,9 @@ class ProcessedData:
             X_feature = []
             for t in epoch_times:
                 t_idx = np.argmin(np.abs(interpolation_timestamps - t))
+                # Window centered around t with half `window_samples` on each side
                 window_idx_start = t_idx - self.input_window_samples // 2
-                window_idx_end = t_idx + self.input_window_samples // 2
+                window_idx_end = t_idx + self.input_window_samples // 2 + (self.input_window_samples % 2)
                 window_data = interpolation[window_idx_start:window_idx_end]
                 # reshape into (1, window_size)
                 window_data = window_data.reshape(1, -1)
