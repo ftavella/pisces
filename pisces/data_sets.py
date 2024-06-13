@@ -485,7 +485,6 @@ class ProcessedData:
             self.model_input_dimension = model_input.model_input_dimension
         elif isinstance(model_input, ModelInputSpectrogram):
             self.spectrogram_preprocessing_config = model_input.spectrogram_preprocessing_config
-            raise NotImplementedError("Spectrogram input type not yet supported")
 
     def get_labels(self, id: str, start: int, end: int,
                    output_feature: str) -> pl.DataFrame | None:
@@ -645,3 +644,11 @@ class ProcessedData:
         X = self.mirror_spectrogram(spectrogram)
 
         return X, y 
+
+    def preprocess_data_for_subject(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
+        if isinstance(self.model_input, ModelInput1D):
+            return self.get_1D_X_y(id)
+        elif isinstance(self.model_input, ModelInputSpectrogram):
+            return self.get_spectrogram_X_y(id)
+        else:
+            raise ValueError("ModelInput type not supported")
