@@ -294,26 +294,24 @@ class DataSetObject:
     
     @classmethod
     def find_data_sets(cls, root: str | Path) -> Dict[str, 'DataSetObject']:
-        set_dir_regex = r".*" + cls.FEATURE_PREFIX + r"(.+)"
-        # this regex matches the feature directory name and the data set name
-        # but doesn't work on Windows (? maybe, cant test) because of the forward slashes
-        feature_dir_regex = r".*/(.+)/" + cls.FEATURE_PREFIX + r"(.+)"
+        root = str(root).replace("\\", "/") # Use consistent separators
+        if not root.endswith("/"):
+            root += "/"
+
+        feature_dir_regex = rf".*/(.+)/{cls.FEATURE_PREFIX}(.+)/?"
 
         data_sets: Dict[str, DataSetObject] = {}
-        for root, dirs, files in os.walk(root, followlinks=True):
-            # check to see if the root is a feature directory,
-            # if it is, add that feature data to the data set object,
-            # creating a new data set object if necessary.
-            if (root_match := re.match(feature_dir_regex, root)):
-                cls.logger.debug(f"Feature directory: {root}")
-                cls.logger.debug(f"data set name: {root_match.group(1)}")
-                cls.logger.debug(f"feature is: {root_match.group(2)}", )
+        for root_dir, dirs, files in os.walk(root, followlinks=True):
+            normalized_root_dir = root_dir.replace("\\", "/")
+            if (root_match := re.match(feature_dir_regex, normalized_root_dir)):
                 data_set_name = root_match.group(1)
                 feature_name = root_match.group(2)
+                # TODO: I think this is the part that fails with only one subject
                 if (data_set := data_sets.get(data_set_name)) is None:
-                    data_set = DataSetObject(root_match.group(1), Path(root).parent)
+                    data_set = DataSetObject(data_set_name, Path(root_dir).parent)
                     data_sets[data_set.name] = data_set
-                files = [f for f in files if not f.startswith(".") and not f.endswith(".tmp")]
-                data_set.add_feature_files(feature_name, files)
-        
+                # Filter out unwanted files
+                relevant_files = [f for f in files if not f.startswith(".") and not f.endswith(".tmp")]
+                data_set.add_feature_files(feature_name, relevant_files)
+
         return data_sets
