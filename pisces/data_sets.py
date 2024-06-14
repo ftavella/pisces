@@ -3,13 +3,15 @@
 # %% auto 0
 __all__ = ['LOG_LEVEL', 'vec_to_WLDM', 'SimplifiablePrefixTree', 'IdExtractor', 'DataSetObject', 'psg_to_sleep_wake', 'to_WLDM',
            'psg_to_WLDM', 'ModelOutputType', 'PSGType', 'ModelInput', 'ModelInput1D', 'ModelInputSpectrogram',
-           'find_overlapping_time_section', 'ProcessedData']
+           'find_overlapping_time_section', 'get_sample_weights', 'mask_psg_from_accel', 'apply_gausian_filter',
+           'fill_gaps_in_accelerometer_data', 'DataProcessor']
 
 # %% ../nbs/01_data_sets.ipynb 4
 from pathlib import Path
 from enum import Enum, auto
 from functools import partial
 from typing import Dict, List, Tuple
+from scipy.ndimage import gaussian_filter1d
 from .mads_olsen_support import MO_PREPROCESSING_CONFIG, MO_UNET_CONFIG
 
 # %% ../nbs/01_data_sets.ipynb 6
@@ -331,9 +333,6 @@ class DataSetObject:
                 data_set.add_feature_files(feature_name, files)
         
         return data_sets
-    
-
-
 
 # %% ../nbs/01_data_sets.ipynb 13
 def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
@@ -459,8 +458,121 @@ def find_overlapping_time_section(
                min_end = min([min_end, time.max()])
      return (max_start, min_end)
 
+
+def get_sample_weights(y: np.ndarray) -> np.ndarray:
+     """
+     Calculate sample weights based on the distribution of classes in the data.
+     Doesn't count masked values (-1) in the class distribution.
+     """
+     # Filter out -1 values
+     valid_y = y[y != -1]
+     # Calculate class counts for valid labels only
+     class_counts = np.bincount(valid_y)
+     class_weights = np.where(class_counts > 0, class_counts.sum() / class_counts, 0)
+     # Map valid class weights to corresponding samples in y
+     sample_weights = np.zeros_like(y, dtype=float)
+     for class_index, weight in enumerate(class_weights):
+          sample_weights[y == class_index] = weight
+     # Masked values (-1) in y will have a weight of 0
+     return sample_weights
+
+
+def mask_psg_from_accel(psg: np.ndarray, accel: np.ndarray, 
+                        psg_epoch: int = 30,
+                        accel_sample_rate: float | None = None,
+                        min_epoch_fraction_covered: float = 0.5
+                        ) -> np.ndarray:
+    print("masking")
+
+    acc_last_index = 0
+    acc_next_index = acc_last_index
+    acc_last_time = accel[acc_last_index, 0]
+    acc_next_time = acc_last_time
+
+    # at least this fraction of 1 epoch must be covered
+    # both in terms of time (no gap longer than 0.5 epochs)
+    # and in terms of expected number of samples in that time.
+    min_epoch_covered = min_epoch_fraction_covered * psg_epoch
+    if accel_sample_rate is None:
+        # median sample step size, if none provided
+        # median to not take into account gaps!
+        accel_sample_rate = np.median(np.diff(accel[:, 0]))
+    min_samples_per = min_epoch_covered / accel_sample_rate
+
+    psg_gap_indices = []
+
+    for (psg_index, psg_sample) in enumerate(psg):
+        epoch_ends = psg_sample[0] + psg_epoch
+
+        # find the last timestamp inside the epoch
+        while (acc_next_time <= epoch_ends and acc_next_index < len(accel)):
+            acc_next_time = accel[acc_next_index, 0]
+            acc_next_index += 1
+        
+        # 1. check for lots of missing time
+        # 2. check for very low sampling rate
+        if ((acc_next_time - acc_last_time) < min_epoch_covered) \
+            or (acc_next_index - acc_last_index < min_samples_per):
+            psg_gap_indices.append(psg_index)
+        
+        # set up for next iteration
+        acc_last_time = acc_next_time
+        acc_last_index = acc_next_index
+    
+    psg[np.array(psg_gap_indices), 1] = -1
+
+    if n_gaps := len(psg_gap_indices):
+        print(f"Masked {n_gaps} PSG epochs")
+    else:
+        print("No masking done")
+
+    return psg
+
+
+def apply_gausian_filter(df: pl.DataFrame, sigma: float = 1.0, overwrite: bool = False) -> pl.DataFrame:
+    data_columns = df.columns[1:]  # Adjust this to match your data column indices
+    # Apply Gaussian smoothing to each data column
+    for col in data_columns:
+        new_col_name = f"{col}_smoothed" if not overwrite else col
+        df = df.with_columns(
+            pl.Series(gaussian_filter1d(df[col].to_numpy(), sigma)).alias(new_col_name)
+        )
+    return df
+
+
+def fill_gaps_in_accelerometer_data(acc: pl.DataFrame, smooth: bool = False, final_sampling_rate_hz: int | None = None) -> np.ndarray:
+    # median sampling rate (to account for missing data)
+    sampling_period_s = acc[acc.columns[0]].diff().median() # 1 / sampling_rate_hz
+    
+    # Step 0: Save the original 'timestamp' column as 'timestamp_raw'
+    acc_resampled = acc.with_columns(acc[acc.columns[0]].alias('timestamp'))
+
+    if isinstance(final_sampling_rate_hz, int):
+        final_rate_sec = 1 / final_sampling_rate_hz
+        print(f"resampling to {final_sampling_rate_hz}Hz ({final_rate_sec:0.5f}s) from {int(1/sampling_period_s)} Hz ({sampling_period_s:0.5f}s)")
+        # make a new data frame with the new timestamps
+        # do this using linear interpolation
+
+        median_time = acc_resampled['timestamp'].to_numpy()
+        final_timestamps = np.arange(median_time.min(), median_time.max() + final_rate_sec, final_rate_sec)
+        median_data = acc_resampled[:, 1:4].to_numpy()
+        new_data = np.zeros((final_timestamps.shape[0], median_data.shape[1]))
+        for i in range(median_data.shape[1]):
+            new_data[:, i] = np.interp(final_timestamps, median_time, median_data[:, i])
+        acc_resampled = pl.DataFrame({
+            'timestamp': final_timestamps, 
+            **{
+                acc_resampled.columns[i+1]: new_data[:, i] 
+                for i in range(new_data.shape[1])
+            }})
+
+    if smooth:
+        acc_resampled = apply_gausian_filter(acc_resampled, overwrite=True)
+
+    return acc_resampled
+
 # %% ../nbs/01_data_sets.ipynb 17
-class ProcessedData:
+class DataProcessor:
     def __init__(self, 
                  data_set: DataSetObject,
                  model_input: ModelInput,
@@ -473,6 +585,7 @@ class ProcessedData:
         self.output_feature = output_feature
         self.output_type = output_type
         self.psg_type = psg_type
+        self.model_input = model_input
 
         if isinstance(model_input, ModelInput1D):
             self.input_window_size = model_input.input_window_size
@@ -488,20 +601,23 @@ class ProcessedData:
         data = data.filter(data[:, 0] >= start)
         data = data.filter(data[:, 0] <= end)
 
-        #TODO: Add masking
+        # Mask PSG data based on accelerometer data if present
+        if "accelerometer" in self.input_features:
+            accelerometer = self.data_set.get_feature_data('accelerometer', id)
+            data = mask_psg_from_accel(data, accelerometer, 
+                                       accel_sample_rate=self.input_sampling_hz)
 
-        if self.output_type == ModelOutputType.SLEEP_WAKE:
-            if output_feature == 'psg':
+        if self.output_feature == 'psg':
+            if self.output_type == ModelOutputType.SLEEP_WAKE:
                 y = psg_to_sleep_wake(data)
-            else:
-                raise ValueError(f"Output feature {output_feature} not supported for ModelOutputType.SLEEP_WAKE")
-        elif self.output_type == ModelOutputType.WAKE_LIGHT_DEEP_REM:
-            if output_feature == 'psg':
+            elif self.output_type == ModelOutputType.WAKE_LIGHT_DEEP_REM:
                 N4 = self.psg_type == PSGType.HAS_N4
                 y = psg_to_WLDM(data, N4)
             else:
-                raise ValueError(f"Output feature {output_feature} not supported for ModelOutputType.WAKE_LIGHT_DEEP_REM")
-        
+                raise ValueError(f"Output type {self.output_type} not supported")
+        else:
+            raise ValueError(f"Output feature {output_feature} not supported")
+
         labels = pl.DataFrame({
             'time': data[:, 0],
             'label': y,
@@ -624,20 +740,19 @@ class ProcessedData:
         max_start, min_end = find_overlapping_time_section(self.data_set, 
                                                            all_features,
                                                            id)
-        # Get labels
-        labels = self.get_labels(id, max_start, min_end, self.output_feature)
-        y = labels[:, 1].to_numpy()
-        # Get spectrogram
         if self.input_features != ['accelerometer']:
             raise ValueError("Spectrogram input only supported for accelerometer data")
 
         accelerometer = self.data_set.get_feature_data('accelerometer', id)
-        #TODO: fill_gaps_in_accelerometer_data
-        # accelerometer = fill_gaps_in_accelerometer_data(accelerometer, smooth=False, final_sampling_rate_hz=self.sampling_hz)
-
+        accelerometer = fill_gaps_in_accelerometer_data(accelerometer, smooth=False, 
+                                                        final_sampling_rate_hz=self.input_sampling_hz)
         # Get spectrogram (mirrored)
         spectrogram = self.accelerometer_to_spectrogram(accelerometer)
         X = self.mirror_spectrogram(spectrogram)
+
+        # Get labels
+        labels = self.get_labels(id, max_start, min_end, self.output_feature)
+        y = labels[:, 1].to_numpy()
 
         return X, y 
 
