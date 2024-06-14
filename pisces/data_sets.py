@@ -355,14 +355,10 @@ def to_WLDM(x: float, N4: bool=True) -> int:
         return 0
     if x < 3:
         return 1
-    if N4:
-        if x < 5:
-            return 2
-        return 3
-    else:
-        if x < 4:
-            return 2
-        return 3
+    rem_value = 5 if N4 else 4
+    if x < rem_value:
+        return 2
+    return 3
 
 vec_to_WLDM = np.vectorize(to_WLDM)
 
