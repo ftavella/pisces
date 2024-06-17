@@ -17,7 +17,7 @@ from .data_sets import DataSetObject, ModelInput1D, ModelInputSpectrogram, Model
 import abc
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import SGDClassifier
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import Pipeline
 import numpy as np
 
 
@@ -43,18 +43,22 @@ class SGDLogisticRegression(SleepWakeClassifier):
      
     The model is trained with a balanced class weight, and uses L1 regularization. The input data is scaled with a `StandardScaler` before being passed to the model.
     """
-    def __init__(self, data_processor: DataProcessor, lr: float = 0.15, ):
+    def __init__(self, 
+                 data_processor: DataProcessor, 
+                 lr: float = 0.15, 
+                 epochs: int = 100):
         self.model = SGDClassifier(loss='log_loss',
                                    learning_rate='adaptive',
                                    penalty='l1',
                                    eta0=lr,
                                    class_weight='balanced',
+                                   max_iter=epochs,
                                    warm_start=True)
         self.scaler = StandardScaler()
-        self.pipeline = make_pipeline(self.scaler, self.model)
+        self.pipeline = Pipeline([('scaler', self.scaler), ('model', self.model)])
         if not isinstance(data_processor.model_input, ModelInput1D):
             raise ValueError("Model input must be set to 1D on the data processor")
-        if not data_processor.model_output == ModelOutputType.SleepWake:
+        if not data_processor.output_type == ModelOutputType.SLEEP_WAKE:
             raise ValueError("Model output must be set to SleepWake on the data processor")
         self.data_processor = data_processor
 
@@ -64,7 +68,8 @@ class SGDLogisticRegression(SleepWakeClassifier):
     def train(self, 
               examples_X: List[np.ndarray]=[], 
               examples_y: List[np.ndarray]=[], 
-              pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[], 
+              pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[],
+              epochs: int = 10,
               ):
         """
         Assumes data is already preprocessed using `get_needed_X_y` 
@@ -77,17 +82,18 @@ class SGDLogisticRegression(SleepWakeClassifier):
                 assert len(examples_X) == len(examples_y)
         if pairs_Xy:
             assert not examples_X
+            examples_X = [pair[0] for pair in pairs_Xy]
+            examples_y = [pair[1] for pair in pairs_Xy]
 
-        X = [self._input_preprocessing(example) for example in examples_X]
 
-        Xs = np.concatenate(X, axis=0)
+        Xs = np.concatenate(examples_X, axis=0)
         ys = np.concatenate(examples_y, axis=0)
 
         selector = ys >= 0
         Xs = Xs[selector]
         ys = ys[selector]
 
-        self.pipeline.fit(Xs, ys)
+        return self.pipeline.fit(Xs, ys)
     
     def _input_preprocessing(self, X: np.ndarray) -> np.ndarray:
         return self.scaler.transform(X)
@@ -295,39 +301,54 @@ class LeaveOneOutSplitter(SplitMaker):
         loo = LeaveOneOut()
         return loo.split(ids)
 
+
 def run_split(train_indices, 
               preprocessed_data_set: List[Tuple[np.ndarray, np.ndarray]], 
-              swc: SleepWakeClassifier) -> SleepWakeClassifier:
+              swc: SleepWakeClassifier,
+              epochs: int) -> SleepWakeClassifier:
     training_pairs = [
         preprocessed_data_set[i][0]
         for i in train_indices
         if preprocessed_data_set[i][0] is not None
     ]
-    swc.train(pairs_Xy=training_pairs)
+    result = swc.train(pairs_Xy=training_pairs, epochs=epochs)
 
-    return swc
+    return swc, result
 
-def run_splits(split_maker: SplitMaker, w: DataSetObject, swc_class: Type[SleepWakeClassifier], exclude: List[str] = []) -> Tuple[
-        List[SleepWakeClassifier], 
-        List[np.ndarray],
-        List[List[List[int]]]]:
+
+def run_splits(split_maker: SplitMaker, 
+               data_processor: DataProcessor, 
+               swc_class: Type[SleepWakeClassifier], 
+               epochs: int,
+               exclude: List[str] = [],
+               ) -> Tuple[
+                   List[SleepWakeClassifier], 
+                   List[np.ndarray], 
+                   List[List[List[int]]] 
+                   ]:
     split_models: List[swc_class] = []
     test_indices = []
+    split_results = []
     splits = []
 
-    preprocessed_data = [(swc_class().get_needed_X_y(w, i), i) for i in w.ids if i not in exclude]
+    swc = swc_class(data_processor, epochs=epochs)
 
-    for train_index, test_index in tqdm(split_maker.split(w.ids)):
+    ids_to_split = [id for id in data_processor.data_set.ids if id not in exclude]
+    tqdm_message_preprocess = f"Preparing data for {len(ids_to_split)} IDs"
+    preprocessed_data = [(swc.get_needed_X_y(id), id) for id in tqdm(ids_to_split, desc=tqdm_message_preprocess)]
+
+    tqdm_message_train = f"Training {len(ids_to_split)} splits"
+    all_splits = split_maker.split(ids_to_split)
+    for train_index, test_index in tqdm(all_splits, desc=tqdm_message_train, total=len(ids_to_split)):
         if preprocessed_data[test_index[0]][0] is None:
             continue
-        model = run_split(train_indices=train_index,
-                        preprocessed_data_set=preprocessed_data,
-                        swc=swc_class())
+        model, result = run_split(train_indices=train_index, 
+                                  preprocessed_data_set=preprocessed_data, 
+                                  swc=swc_class(data_processor, epochs=epochs), 
+                                  epochs=epochs)
         split_models.append(model)
+        split_results.append(result)
         test_indices.append(test_index[0])
         splits.append([train_index, test_index])
-        # break
     
-    return split_models, preprocessed_data, splits
-
-
+    return split_models, split_results, preprocessed_data, splits
