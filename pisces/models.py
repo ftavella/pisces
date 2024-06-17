@@ -5,6 +5,7 @@ __all__ = ['SleepWakeClassifier', 'SGDLogisticRegression', 'MOResUNetPretrained'
            'run_split', 'run_splits']
 
 # %% ../nbs/02_models.ipynb 4
+import keras
 import numpy as np
 import polars as pl
 from pathlib import Path
@@ -120,15 +121,24 @@ class MOResUNetPretrained(SleepWakeClassifier):
     def __init__(
         self,
         sampling_hz: int = FS,
+        tf_model: keras.Model = None,
     ) -> None:
         """
         Initialize the MOResUNetPretrained classifier.
 
         Args:
             sampling_hz (int, optional): The sampling frequency in Hz. Defaults to FS.
+            tf_model (keras.Model, optional): The TensorFlow model to use. Defaults to None, in which case the model is loaded from disk.
         """
         super().__init__()
         self.sampling_hz = sampling_hz
+        self._tf_model = tf_model
+
+    @property
+    def tf_model(self) -> keras.Model:
+        if self._tf_model is None:
+            self._tf_model = load_saved_keras()
+        return self._tf_model
 
     def prepare_set_for_training(self, 
                                  data_processor: DataProcessor, 
@@ -180,9 +190,52 @@ class MOResUNetPretrained(SleepWakeClassifier):
               examples_X: List[pl.DataFrame] = [], 
               examples_y: List[pl.DataFrame] = [], 
               pairs_Xy: List[Tuple[pl.DataFrame, pl.DataFrame]] = [], 
-              epochs: int = 10, batch_size: int = 32):
-        """Training is not implemented yet for this model. You can run inference, though, using `predict_probabilities` and `predict`."""
-        pass
+              lr: float = 1e-5, validation_split: float = 0.1,
+              epochs: int = 10, batch_size: int = 1,):
+        """
+        Trains the associated Keras model.
+        """
+        if examples_X or examples_y:
+            assert len(examples_X) == len(examples_y)
+        if pairs_Xy:
+            assert not examples_X
+
+        training = []
+        training_iterator = iter(pairs_Xy) if pairs_Xy else zip(examples_X, examples_y)
+        for X, y in training_iterator:
+            try:
+                y_reshaped = np.pad(
+                    y.reshape(1, -1), 
+                    pad_width=[
+                        (0, 0), # axis 0, no padding
+                        (0, N_OUT - y.shape[0]), # axis 1, pad to N_OUT from mads_olsen_support
+                    ],
+                    mode='constant', 
+                    constant_values=0) 
+                sample_weights = y_reshaped >= 0
+                training.append((X, y_reshaped, sample_weights))
+            except Exception as e:
+                print(f"Error folding or trimming data: {e}")
+                continue
+
+        Xs = [X for X, _, _ in training]
+        ys = [y for _, y, _ in training]
+        weights = [w for _, _, w in training]
+        Xs_c = np.concatenate(Xs, axis=0)
+        ys_c = np.concatenate(ys, axis=0)
+        weights = np.concatenate(weights, axis=0)
+
+        self.tf_model.compile(
+            optimizer=keras.optimizers.RMSprop(learning_rate=lr), 
+            loss=keras.losses.SparseCategoricalCrossentropy(),
+            metrics=[keras.metrics.SparseCategoricalAccuracy()],
+            weighted_metrics=[])
+
+        fit_result = self.tf_model.fit(
+            Xs_c, ys_c * weights, batch_size=batch_size, epochs=epochs,
+            sample_weight=weights, validation_split=validation_split,)
+
+        return fit_result
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
@@ -216,12 +269,15 @@ class MOResUNetPretrained(SleepWakeClassifier):
         ]
 
         evaluations: Dict[str, dict] = {}
+        '''
+        #TODO: Evaluation for MO
         for i, ((X, y), id) in enumerate(mo_preprocessed_data):
             y_hat_proba = self.predict_probabilities(X)
             y_hat_sleep_proba = (1 - y_hat_proba[:, :, 0]).reshape(-1,)
             analysis = split_analysis(y, y_hat_sleep_proba)
             evaluations[id] = analysis
             print(f"Processing {i+1} of {len(mo_preprocessed_data)} ({id})... AUROC: {analysis['auc']}")
+        '''
         return evaluations, mo_preprocessed_data
 
 # %% ../nbs/02_models.ipynb 12
