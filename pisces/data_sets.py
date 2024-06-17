@@ -177,6 +177,8 @@ class IdExtractor(SimplifiablePrefixTree):
         super().__init__(delimiter, key)
 
     def extract_ids(self, files: List[str]) -> List[str]:
+        if len(files) < 1:
+            raise ValueError("Please provide 2 or more file names to extract IDs")
         for file in files:
             self.insert(file[::-1])
         return sorted([
@@ -190,7 +192,7 @@ class IdExtractor(SimplifiablePrefixTree):
         return self.simplified().flattened(1).reversed()
     
 
-# %% ../nbs/01_data_sets.ipynb 10
+# %% ../nbs/01_data_sets.ipynb 11
 LOG_LEVEL = logging.INFO
 
 class DataSetObject:
