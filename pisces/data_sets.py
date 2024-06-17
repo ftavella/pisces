@@ -176,23 +176,49 @@ class IdExtractor(SimplifiablePrefixTree):
     def __init__(self, delimiter: str = "", key: str = ""):
         super().__init__(delimiter, key)
 
-    def extract_ids(self, files: List[str]) -> List[str]:
-        if len(files) < 1:
-            raise ValueError("Please provide 2 or more file names to extract IDs")
-        for file in files:
-            self.insert(file[::-1])
-        return sorted([
-            c.key for c in self
-                .prefix_flattened()
-                .children
-                .values()
-        ])
+    def extract_ids(self, files: List[str], id_template: str | None=None) -> List[str]:
+        """
+        Extracts IDs from a list of file names. If an ID template is provided, the algorithm will use that to extract the IDs. If not, the algorithm will extract the IDs based on the assumption that the files share a common structure.
+        When providing an ID template, do it as follows: `"prefix<<ID>>suffix"`. Either the prefix or suffix can be empty, but the `<<ID>>` part must be present.
+        """
+        if len(files) == 0:
+            raise ValueError("Please provide at least one file name to extract IDs")
+
+        if len(files) == 1:
+            if not id_template:
+                raise ValueError("Please provide an ID template if you only have one file name.")
+            else:
+                file = files[0]
+                prefix = id_template[:id_template.find("<<")]
+                suffix = id_template[id_template.find(">>")+2:]
+                id_str = file.replace(prefix, "").replace(suffix, "")
+                return [id_str]
+
+        
+        if not id_template:
+            for file in files:
+                self.insert(file[::-1])
+            return sorted([
+                c.key for c in self
+                    .prefix_flattened()
+                    .children
+                    .values()
+            ])
+        else:
+            ids = []
+            for file in files:
+                prefix = id_template[:id_template.find("<<")]
+                suffix = id_template[id_template.find(">>")+2:]
+                id_str = file.replace(prefix, "").replace(suffix, "")
+                ids.append(id_str)
+            
+            return sorted(ids)
     
     def prefix_flattened(self) -> 'IdExtractor':
         return self.simplified().flattened(1).reversed()
     
 
-# %% ../nbs/01_data_sets.ipynb 11
+# %% ../nbs/01_data_sets.ipynb 9
 LOG_LEVEL = logging.INFO
 
 class DataSetObject:
