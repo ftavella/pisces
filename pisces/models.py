@@ -131,7 +131,8 @@ class MOResUNetPretrained(SleepWakeClassifier):
         self.sampling_hz = sampling_hz
 
     def prepare_set_for_training(self, 
-                                 data_set: DataSetObject, ids: List[str] | None = None,
+                                 data_processor: DataProcessor, 
+                                 ids: List[str],
                                  max_workers: int | None = None 
                                  ) -> List[Tuple[np.ndarray, np.ndarray] | None]:
         """
@@ -145,74 +146,35 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Returns:
             List[Tuple[np.ndarray, np.ndarray] | None]: A list of tuples, where each tuple is the result of `get_needed_X_y` for a given ID. An empty list indicates an error occurred during processing.
         """
-        if ids is None:
-            ids = data_set.ids
         results = []
         
-        if ids:
-            data_set_and_ids = [(data_set, id) for id in ids]
-            # Get the number of available CPU cores
-            num_cores = multiprocessing.cpu_count()
-            workers_to_use = max_workers if max_workers is not None else num_cores
-            if (workers_to_use > num_cores):
-                warnings.warn(f"Attempting to use {max_workers} but only have {num_cores}. Running with {num_cores} workers.")
-                workers_to_use = num_cores
-            if workers_to_use <= 0:
-                workers_to_use = num_cores + max_workers
-            if workers_to_use < 1:
-                # do this check second, NOT with elif, to verify we're still in a valid state
-                raise ValueError(f"With `max_workers` == {max_workers}, we end up with max_workers + num_cores ({max_workers} + {num_cores}) which is less than 1. This is an error.")
+        processor_and_ids = [(data_processor, id) for id in ids]
+        # Get the number of available CPU cores
+        num_cores = multiprocessing.cpu_count()
+        workers_to_use = max_workers if max_workers is not None else num_cores
+        if (workers_to_use > num_cores):
+            warnings.warn(f"Attempting to use {max_workers} but only have {num_cores}. Running with {num_cores} workers.")
+            workers_to_use = num_cores
+        if workers_to_use <= 0:
+            workers_to_use = num_cores + max_workers
+        if workers_to_use < 1:
+            # do this check second, NOT with elif, to verify we're still in a valid state
+            raise ValueError(f"With `max_workers` == {max_workers}, we end up with max_workers + num_cores ({max_workers} + {num_cores}) which is less than 1. This is an error.")
 
-            print(f"Using {workers_to_use} of {num_cores} cores ({int(100 * workers_to_use / num_cores)}%) for parallel preprocessing.")
-            print(f"This can cause memory or heat issues if  is too high; if you run into problems, call prepare_set_for_training() again with max_workers = -1, going more negative if needed. (See the docstring for more info.)")
+        print(f"Using {workers_to_use} of {num_cores} cores ({int(100 * workers_to_use / num_cores)}%) for parallel preprocessing.")
+        print(f"This can cause memory or heat issues if  is too high; if you run into problems, call prepare_set_for_training() again with max_workers = -1, going more negative if needed. (See the docstring for more info.)")
+        # Create a pool of workers
+        with ProcessPoolExecutor(max_workers=workers_to_use) as executor:
+            results = list(
+                executor.map(
+                    self.get_needed_X_y,
+                    processor_and_ids,
+                ))
 
-            # Create a pool of workers
-            with ProcessPoolExecutor(max_workers=workers_to_use) as executor:
-                results = list(
-                    executor.map(
-                        self.get_needed_X_y_from_pair, 
-                        data_set_and_ids
-                    ))
-        else:
-            warnings.warn("No IDs found in the data set.")
-            return results
         return results
-    
-    def get_needed_X_y_from_pair(self, pair: Tuple[DataSetObject, str]) -> Tuple[np.ndarray, np.ndarray] | None:
-        """
-        Get the needed X and y data from a pair of data set and ID.
 
-        Args:
-            pair (Tuple[DataSetObject, str]): The pair of data set and ID.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray] | None: The X and y data as a tuple, or None if an error occurred.
-        """
-        data_set, id = pair
-        print(f"getting needed X, y for {id}")
-        return self.get_needed_X_y(data_set, id)
-    
-    def get_needed_X_y(self, data_set: DataSetObject, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
-        # WIP
-        """
-        accelerometer = data_set.get_feature_data("accelerometer", id)
-        psg = data_set.get_feature_data("psg", id)
-
-        if accelerometer is None or psg is None:
-            print(f"ID {id} {'psg' if psg is None else 'accelerometer'} not found in {data_set.name}")
-            return None
-        
-        print("sampling hz:", self.sampling_hz)
-        accelerometer = fill_gaps_in_accelerometer_data(accelerometer, smooth=False, final_sampling_rate_hz=self.sampling_hz)
-        stop_time = min(accelerometer[:, 0].max(), psg[:, 0].max())
-        accelerometer = accelerometer.filter(accelerometer[:, 0] <= stop_time)
-        psg = psg.filter(psg[:, 0] <= stop_time)
-
-        mirrored_spectro = self._input_preprocessing(accelerometer)
-
-        return mirrored_spectro, psg_to_sleep_wake(psg)
-        """
-        pass
+    def get_needed_X_y(self, data_processor: DataProcessor, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
+        return data_processor.get_spectrogram(id)
 
     def train(self, 
               examples_X: List[pl.DataFrame] = [], 
@@ -230,40 +192,6 @@ class MOResUNetPretrained(SleepWakeClassifier):
             sample_X = sample_X.to_numpy()
         return self._evaluate_tf_model(sample_X)
 
-    def roc_curve(self, examples_X_y: Tuple[np.ndarray, np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
-        raise NotImplementedError
-    def roc_auc(self, examples_X_y: Tuple[np.ndarray, np.ndarray]) -> float:
-        raise NotImplementedError
-
-    @classmethod
-    def _spectrogram_preprocessing(cls, acc_xyz: np.ndarray) -> np.ndarray:
-        return cls._preprocessing(acc_xyz)
-
-    @classmethod
-    def _input_preprocessing(
-        cls,
-        acc_xyz: pl.DataFrame | np.ndarray
-    ) -> np.ndarray:
-
-        spec = cls._spectrogram_preprocessing(acc_xyz)
-
-        # We will copy the spectrogram to both channels, flipping it on channel 1
-        input_shape = (1, *MO_UNET_CONFIG['input_shape'])
-        inputs_len = input_shape[1]
-
-        inputs = np.zeros(shape=input_shape, dtype=np.float32)
-        # We must do some careful work with indices to not overflow arrays
-        spec = spec[:inputs_len].astype(np.float32) # protect agains spec.len > input_shape
-
-        #! careful, order matters here. We first trim spec to make sure it'll fit into inputs,
-        # then compute the new length which we KNOW is <= inputs_len
-        spec_len = spec.shape[0]
-        # THEN we assign only as much inputs as spec covers
-        inputs[0, : spec_len, :, 0] = spec # protect agains spec_len < input_shape
-        inputs[0, : spec_len, :, 1] = spec[:, ::-1]
-
-        return inputs
-
     def _evaluate_tf_model(self, inputs: np.ndarray) -> np.ndarray:
         # set input tensor to FLOAT32
         inputs = inputs.astype(np.float32)
@@ -272,42 +200,17 @@ class MOResUNetPretrained(SleepWakeClassifier):
         preds = self.tf_model.predict(inputs)
 
         return preds
-    
-    @classmethod
-    def _preprocessing(
-        cls,
-        acc: pl.DataFrame | np.ndarray
-    ) -> np.ndarray:
-        """
-        The Mads Olsen repo uses a list of transformations
-        """
-        if isinstance(acc, pl.DataFrame):
-            acc = acc.to_numpy()
-        x_ = acc[:, 0]
-        y_ = acc[:, 1]
-        z_ = acc[:, 2]
-        for step in cls.config["preprocessing"]:
-            fn = eval(step["type"])  # convert string version to function in environment
-            fn_args = partial(
-                fn, **step["args"]
-            )  # fill in the args given, which must be everything besides numerical input
 
-            # apply
-            x_ = fn_args(x_)
-            y_ = fn_args(y_)
-            z_ = fn_args(z_)
-
-        spec = x_ + y_ + z_
-        spec /= 3.0
-
-        return spec
-
-    def evaluate_data_set(self, data_set: DataSetObject, exclude: List[str] = [], max_workers: int = None) -> Tuple[Dict[str, dict], list]:
+    def evaluate_data_set(self, 
+                          data_processor: DataProcessor, 
+                          exclude: List[str] = [], 
+                          max_workers: int = None) -> Tuple[Dict[str, dict], list]:
+        data_set = data_processor.data_set
         filtered_ids = [id for id in data_set.ids if id not in exclude]
         mo_preprocessed_data = [
             (d, i) 
             for (d, i) in zip(
-                self.prepare_set_for_training(data_set, filtered_ids, max_workers=max_workers),
+                self.prepare_set_for_training(data_processor, filtered_ids, max_workers=max_workers),
                 filtered_ids) 
             if d is not None
         ]
