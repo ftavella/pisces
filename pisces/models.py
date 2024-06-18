@@ -5,9 +5,11 @@ __all__ = ['SleepWakeClassifier', 'SGDLogisticRegression', 'MOResUNetPretrained'
            'run_split', 'run_splits']
 
 # %% ../nbs/02_models.ipynb 4
+import sys
 import keras
 import numpy as np
 import polars as pl
+from io import StringIO
 from pathlib import Path
 from enum import Enum, auto
 from typing import Dict, List, Tuple
@@ -46,14 +48,15 @@ class SGDLogisticRegression(SleepWakeClassifier):
     def __init__(self, 
                  data_processor: DataProcessor, 
                  lr: float = 0.15, 
-                 epochs: int = 100):
+                 epochs: int = 100,):
         self.model = SGDClassifier(loss='log_loss',
                                    learning_rate='adaptive',
                                    penalty='l1',
                                    eta0=lr,
                                    class_weight='balanced',
                                    max_iter=epochs,
-                                   warm_start=True)
+                                   warm_start=True,
+                                   verbose=1)
         self.scaler = StandardScaler()
         self.pipeline = Pipeline([('scaler', self.scaler), ('model', self.model)])
         if not isinstance(data_processor.model_input, ModelInput1D):
@@ -74,6 +77,8 @@ class SGDLogisticRegression(SleepWakeClassifier):
         """
         Assumes data is already preprocessed using `get_needed_X_y` 
         and ready to be passed to the model.
+
+        Returns the loss history of the model.
         """
         if (examples_X and not examples_y) or (examples_y and not examples_X):
             raise ValueError("If providing examples, must provide both X and y")
@@ -93,7 +98,19 @@ class SGDLogisticRegression(SleepWakeClassifier):
         Xs = Xs[selector]
         ys = ys[selector]
 
-        return self.pipeline.fit(Xs, ys)
+        # Get loss
+        old_stdout = sys.stdout
+        sys.stdout = mystdout = StringIO()
+        self.pipeline.fit(Xs, ys) # Fit the model
+        sys.stdout = old_stdout
+        loss_history = mystdout.getvalue()
+        loss_list = []
+        for line in loss_history.split('\n'):
+            if(len(line.split("loss: ")) == 1):
+                continue
+            loss_list.append(float(line.split("loss: ")[-1]))
+
+        return loss_list
     
     def _input_preprocessing(self, X: np.ndarray) -> np.ndarray:
         return self.scaler.transform(X)
