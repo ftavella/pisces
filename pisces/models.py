@@ -9,9 +9,11 @@ import sys
 import keras
 import numpy as np
 import polars as pl
+from tqdm import tqdm
 from io import StringIO
 from pathlib import Path
 from enum import Enum, auto
+from itertools import repeat
 from typing import Dict, List, Tuple
 from .data_sets import DataSetObject, ModelInput1D, ModelInputSpectrogram, ModelOutputType, DataProcessor
 
@@ -181,7 +183,6 @@ class MOResUNetPretrained(SleepWakeClassifier):
         """
         results = []
         
-        processor_and_ids = [(data_processor, id) for id in ids]
         # Get the number of available CPU cores
         num_cores = multiprocessing.cpu_count()
         workers_to_use = max_workers if max_workers is not None else num_cores
@@ -199,15 +200,18 @@ class MOResUNetPretrained(SleepWakeClassifier):
         # Create a pool of workers
         with ProcessPoolExecutor(max_workers=workers_to_use) as executor:
             results = list(
-                executor.map(
-                    self.get_needed_X_y,
-                    processor_and_ids,
+                tqdm(
+                    executor.map(
+                        self.get_needed_X_y,
+                        repeat(data_processor),
+                        ids,
+                    ), total=len(ids), desc="Processing data..."
                 ))
 
         return results
 
     def get_needed_X_y(self, data_processor: DataProcessor, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
-        return data_processor.get_spectrogram(id)
+        return data_processor.get_spectrogram_X_y(id)
 
     def train(self, 
               examples_X: List[pl.DataFrame] = [], 

@@ -407,19 +407,19 @@ class ModelInput1D(ModelInput):
     def __init__(self,
                  input_features: List[str] | str,
                  input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
-                 input_window_size: int | float, # Window size (in seconds) for the input data. Window will be centered around the time point for which the model is making a prediction
+                 input_window_time: int | float, # Window size (in seconds) for the input data. Window will be centered around the time point for which the model is making a prediction
                  ):
         super().__init__(input_features, input_sampling_hz)
-        # input_window_size
-        if not isinstance(input_window_size, (int, float)):
-            raise ValueError("input_window_size must be an int or a float")
+        # input_window_time
+        if not isinstance(input_window_time, (int, float)):
+            raise ValueError("input_window_time must be an int or a float")
         else:
-            if input_window_size <= 0:
-                raise ValueError("input_window_size must be greater than 0")
+            if input_window_time <= 0:
+                raise ValueError("input_window_time must be greater than 0")
 
-        self.input_window_size = float(input_window_size)
+        self.input_window_time = float(input_window_time)
         # Number of samples for the input window of a single feature
-        self.input_window_samples = int(self.input_window_size * self.input_sampling_hz)
+        self.input_window_samples = int(self.input_window_time * self.input_sampling_hz)
         ## force it to be odd to have perfectly centered window
         if self.input_window_samples % 2 == 0:
             self.input_window_samples += 1
@@ -584,7 +584,7 @@ class DataProcessor:
         self.model_input = model_input
 
         if isinstance(model_input, ModelInput1D):
-            self.input_window_size = model_input.input_window_size
+            self.input_window_time = model_input.input_window_time
             self.input_sampling_hz = model_input.input_sampling_hz
             self.input_window_samples = model_input.input_window_samples
             self.model_input_dimension = model_input.model_input_dimension
@@ -631,7 +631,7 @@ class DataProcessor:
                 t_idx = np.argmin(np.abs(interpolation_timestamps - t))
                 # Window centered around t with half `window_samples` on each side
                 window_idx_start = t_idx - self.input_window_samples // 2
-                window_idx_end = t_idx + self.input_window_samples // 2 + (self.input_window_samples % 2)
+                window_idx_end = t_idx + self.input_window_samples // 2 + 1
                 window_data = interpolation[window_idx_start:window_idx_end]
                 # reshape into (1, window_size)
                 window_data = window_data.reshape(1, -1)
@@ -649,15 +649,15 @@ class DataProcessor:
         # Get labels
         labels = self.get_labels(id, max_start, min_end, self.output_feature)
         label_times = labels[:, 0]
-        epoch_start = label_times.min() + self.input_window_size / 2.0
-        epoch_end = label_times.max() - self.input_window_size / 2.0
+        epoch_start = label_times.min() + self.input_window_time / 2.0
+        epoch_end = label_times.max() - self.input_window_time / 2.0
         filtered_labels = labels.filter(labels[:, 0] >= epoch_start)
         filtered_labels = filtered_labels.filter(filtered_labels[:, 0] <= epoch_end)
         epoch_times = filtered_labels[:, 0]
         # Get input data
         interpolation_timestamps = np.arange(max_start, 
-                                             min_end, 
-                                             1.0/self.input_sampling_hz)
+                                             min_end + 1.0/self.input_sampling_hz,
+                                             1.0/self.input_sampling_hz,)
         # Interpolate all data to the same time points
         interpolated_features = []
         for feature in self.input_features:
