@@ -7,12 +7,13 @@ __all__ = ['LOG_LEVEL', 'vec_to_WLDM', 'SimplifiablePrefixTree', 'IdExtractor', 
            'fill_gaps_in_accelerometer_data', 'DataProcessor']
 
 # %% ../nbs/01_data_sets.ipynb 4
+import importlib
 from pathlib import Path
 from enum import Enum, auto
 from functools import partial
 from typing import Dict, List, Tuple
 from scipy.ndimage import gaussian_filter1d
-from .mads_olsen_support import MO_PREPROCESSING_CONFIG, MO_UNET_CONFIG
+from .mads_olsen_support import *
 
 # %% ../nbs/01_data_sets.ipynb 6
 from copy import deepcopy
@@ -376,7 +377,7 @@ def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
     """
     return vec_to_WLDM(psg[:, 1].to_numpy(), N4)
 
-# %% ../nbs/01_data_sets.ipynb 15
+# %% ../nbs/01_data_sets.ipynb 16
 class ModelOutputType(Enum):
     SLEEP_WAKE = auto()
     WAKE_LIGHT_DEEP_REM = auto()
@@ -432,9 +433,10 @@ class ModelInputSpectrogram(ModelInput):
                  spectrogram_preprocessing_config: Dict=MO_PREPROCESSING_CONFIG, # Steps in the preprocessing pipeline for getting a spectrogram from acceleration
                  ):
         super().__init__(input_features, input_sampling_hz)
+        self.input_sampling_hz = float(input_sampling_hz)
         self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
-# %% ../nbs/01_data_sets.ipynb 16
+# %% ../nbs/01_data_sets.ipynb 17
 def find_overlapping_time_section(
      data_set: DataSetObject,
      features: List[str], # List of features included in the calculation, typically a combination of input and output features
@@ -482,7 +484,6 @@ def mask_psg_from_accel(psg: np.ndarray, accel: np.ndarray,
                         accel_sample_rate: float | None = None,
                         min_epoch_fraction_covered: float = 0.5
                         ) -> np.ndarray:
-    print("masking")
 
     acc_last_index = 0
     acc_next_index = acc_last_index
@@ -520,11 +521,6 @@ def mask_psg_from_accel(psg: np.ndarray, accel: np.ndarray,
         acc_last_index = acc_next_index
     
     psg[np.array(psg_gap_indices), 1] = -1
-
-    if n_gaps := len(psg_gap_indices):
-        print(f"Masked {n_gaps} PSG epochs")
-    else:
-        print("No masking done")
 
     return psg
 
@@ -571,7 +567,7 @@ def fill_gaps_in_accelerometer_data(acc: pl.DataFrame, smooth: bool = False, fin
 
     return acc_resampled
 
-# %% ../nbs/01_data_sets.ipynb 17
+# %% ../nbs/01_data_sets.ipynb 18
 class DataProcessor:
     def __init__(self, 
                  data_set: DataSetObject,
@@ -593,6 +589,7 @@ class DataProcessor:
             self.input_window_samples = model_input.input_window_samples
             self.model_input_dimension = model_input.model_input_dimension
         elif isinstance(model_input, ModelInputSpectrogram):
+            self.input_sampling_hz = model_input.input_sampling_hz
             self.spectrogram_preprocessing_config = model_input.spectrogram_preprocessing_config
 
     def get_labels(self, id: str, start: int, end: int,
@@ -695,12 +692,11 @@ class DataProcessor:
         else:
             raise ValueError("accelerometer must be a polars DataFrame")
 
-        #TODO: Check if x is 0 or time is 0 for our case
-        x_ = acc[:, 0]
-        y_ = acc[:, 1]
-        z_ = acc[:, 2]
+        x_ = acc[:, 1]
+        y_ = acc[:, 2]
+        z_ = acc[:, 3]
 
-        for step in self.spectrogram_preprocessing_config:
+        for step in self.spectrogram_preprocessing_config["preprocessing"]:
             fn = eval(step["type"])  # convert string version to function in environment
             fn_args = partial(
                 fn, **step["args"]
@@ -723,7 +719,7 @@ class DataProcessor:
 
         mirrored = np.zeros(shape=input_shape, dtype=np.float32)
         # We must do some careful work with indices to not overflow arrays
-        spec = spec[:inputs_len].astype(np.float32) # protect agains spec.len > input_shape
+        spec = spectrogram[:inputs_len].astype(np.float32) # protect agains spec.len > input_shape
 
         #! careful, order matters here. We first trim spec to make sure it'll fit into inputs,
         # then compute the new length which we KNOW is <= inputs_len
