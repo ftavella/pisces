@@ -543,24 +543,25 @@ def fill_gaps_in_accelerometer_data(acc: pl.DataFrame, smooth: bool = False, fin
     # Step 0: Save the original 'timestamp' column as 'timestamp_raw'
     acc_resampled = acc.with_columns(acc[acc.columns[0]].alias('timestamp'))
 
-    if isinstance(final_sampling_rate_hz, int):
-        final_rate_sec = 1 / final_sampling_rate_hz
-        print(f"resampling to {final_sampling_rate_hz}Hz ({final_rate_sec:0.5f}s) from {int(1/sampling_period_s)} Hz ({sampling_period_s:0.5f}s)")
-        # make a new data frame with the new timestamps
-        # do this using linear interpolation
+    #TODO: Check non int sampling rates
+    # if isinstance(final_sampling_rate_hz, int):
+    final_rate_sec = 1 / final_sampling_rate_hz
+    print(f"resampling to {final_sampling_rate_hz}Hz ({final_rate_sec:0.5f}s) from {int(1/sampling_period_s)} Hz ({sampling_period_s:0.5f}s)")
+    # make a new data frame with the new timestamps
+    # do this using linear interpolation
 
-        median_time = acc_resampled['timestamp'].to_numpy()
-        final_timestamps = np.arange(median_time.min(), median_time.max() + final_rate_sec, final_rate_sec)
-        median_data = acc_resampled[:, 1:4].to_numpy()
-        new_data = np.zeros((final_timestamps.shape[0], median_data.shape[1]))
-        for i in range(median_data.shape[1]):
-            new_data[:, i] = np.interp(final_timestamps, median_time, median_data[:, i])
-        acc_resampled = pl.DataFrame({
-            'timestamp': final_timestamps, 
-            **{
-                acc_resampled.columns[i+1]: new_data[:, i] 
-                for i in range(new_data.shape[1])
-            }})
+    median_time = acc_resampled['timestamp'].to_numpy()
+    final_timestamps = np.arange(median_time.min(), median_time.max() + final_rate_sec, final_rate_sec)
+    median_data = acc_resampled[:, 1:4].to_numpy()
+    new_data = np.zeros((final_timestamps.shape[0], median_data.shape[1]))
+    for i in range(median_data.shape[1]):
+        new_data[:, i] = np.interp(final_timestamps, median_time, median_data[:, i])
+    acc_resampled = pl.DataFrame({
+        'timestamp': final_timestamps, 
+        **{
+            acc_resampled.columns[i+1]: new_data[:, i] 
+            for i in range(new_data.shape[1])
+        }})
 
     if smooth:
         acc_resampled = apply_gausian_filter(acc_resampled, overwrite=True)
@@ -736,10 +737,16 @@ class DataProcessor:
         max_start, min_end = find_overlapping_time_section(self.data_set, 
                                                            all_features,
                                                            id)
+
+
         if self.input_features != ['accelerometer']:
             raise ValueError("Spectrogram input only supported for accelerometer data")
 
         accelerometer = self.data_set.get_feature_data('accelerometer', id)
+        # Use only the overlapping time section
+        accelerometer = accelerometer.filter(accelerometer[:, 0] >= max_start)
+        accelerometer = accelerometer.filter(accelerometer[:, 0] <= min_end)
+        # Fill gaps in accelerometer data
         accelerometer = fill_gaps_in_accelerometer_data(accelerometer, smooth=False, 
                                                         final_sampling_rate_hz=self.input_sampling_hz)
         # Get spectrogram (mirrored)
@@ -749,6 +756,11 @@ class DataProcessor:
         # Get labels
         labels = self.get_labels(id, max_start, min_end, self.output_feature)
         y = labels[:, 1].to_numpy()
+        # Match labels to model output
+        if len(y) < N_OUT:
+            y = np.pad(y, (0, N_OUT - len(y)), constant_values=-1)
+        elif len(y) > N_OUT:
+            y = y[:N_OUT]
 
         return X, y 
 

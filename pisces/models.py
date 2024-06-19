@@ -205,7 +205,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
                         self.get_needed_X_y,
                         repeat(data_processor),
                         ids,
-                    ), total=len(ids), desc="Processing data..."
+                    ), total=len(ids), desc="Preparing data..."
                 ))
 
         return results
@@ -270,15 +270,11 @@ class MOResUNetPretrained(SleepWakeClassifier):
     def predict_probabilities(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         if isinstance(sample_X, pl.DataFrame):
             sample_X = sample_X.to_numpy()
-        return self._evaluate_tf_model(sample_X)
+        return self._evaluate_tf_model(sample_X)[0]
 
     def _evaluate_tf_model(self, inputs: np.ndarray) -> np.ndarray:
-        # set input tensor to FLOAT32
         inputs = inputs.astype(np.float32)
-
-        # run inference
         preds = self.tf_model.predict(inputs)
-
         return preds
 
     def evaluate_data_set(self, 
@@ -287,6 +283,8 @@ class MOResUNetPretrained(SleepWakeClassifier):
                           max_workers: int = None) -> Tuple[Dict[str, dict], list]:
         data_set = data_processor.data_set
         filtered_ids = [id for id in data_set.ids if id not in exclude]
+        # Prepare the data
+        print("Preprocessing data...")
         mo_preprocessed_data = [
             (d, i) 
             for (d, i) in zip(
@@ -295,16 +293,30 @@ class MOResUNetPretrained(SleepWakeClassifier):
             if d is not None
         ]
 
+        print("Evaluating data set...")
         evaluations: Dict[str, dict] = {}
-        '''
-        #TODO: Evaluation for MO
-        for i, ((X, y), id) in enumerate(mo_preprocessed_data):
-            y_hat_proba = self.predict_probabilities(X)
-            y_hat_sleep_proba = (1 - y_hat_proba[:, :, 0]).reshape(-1,)
-            analysis = split_analysis(y, y_hat_sleep_proba)
-            evaluations[id] = analysis
-            print(f"Processing {i+1} of {len(mo_preprocessed_data)} ({id})... AUROC: {analysis['auc']}")
-        '''
+        for _, ((X, y_true), id) in tqdm(enumerate(mo_preprocessed_data)):
+            y_prob = self.predict_probabilities(X)
+            m = keras.metrics.SparseCategoricalAccuracy()
+            # Remove masked values
+            selector = y_true >= 0
+            y_true_filtered = y_true[selector]
+            y_prob_filtered = y_prob[selector]
+            # Calculate sample weights
+            unique, counts = np.unique(y_true_filtered, return_counts=True)
+            class_weights = dict(zip(unique, counts))
+            inv_class_weights = {k: 1.0 / v for k, v in class_weights.items()}
+            min_weight = min(inv_class_weights.values())
+            normalized_weights = {k: v / min_weight for k, v in inv_class_weights.items()}
+            sample_weights = np.array([normalized_weights[class_id] for class_id in y_true_filtered])
+            # Sparse categorical accuracy
+            y_true_reshaped = y_true_filtered.reshape(-1, 1)
+            m.update_state(y_true_reshaped, y_prob_filtered, sample_weight=sample_weights)
+            accuracy = m.result().numpy()
+            evaluations[id] = {
+                'sparse_categorical_accuracy': accuracy,
+            }
+
         return evaluations, mo_preprocessed_data
 
 # %% ../nbs/02_models.ipynb 12
