@@ -659,19 +659,11 @@ class DataProcessor:
         for feature in self.input_features:
             data = self.data_set.get_feature_data(feature, id)
             feature_times = data[:, 0]
-            if feature == 'accelerometer':
-                # Handle accelerometer data
-                for i in range(1, 4):
-                    feature_values = data[:, i]
-                    X_feature = self.get_1D_X_for_feature(interpolation_timestamps, 
-                                                          epoch_times, feature_times, 
-                                                          feature_values)
-                    interpolated_features.append(X_feature)
-            else:
-                feature_values = data[:, 1]
+            for i in range(1, data.shape[1]):
+                feature_values = data[:, i]
                 X_feature = self.get_1D_X_for_feature(interpolation_timestamps, 
-                                                      epoch_times, feature_times, 
-                                                      feature_values)
+                                                        epoch_times, feature_times, 
+                                                        feature_values)
                 interpolated_features.append(X_feature)
         # Concatenate input features alongside the first dimension
         X = np.concatenate(interpolated_features, axis=1)
