@@ -573,14 +573,22 @@ class DataProcessor:
         self.psg_type = psg_type
         self.model_input = model_input
 
-        if isinstance(model_input, ModelInput1D):
+        if self.is_1D:
             self.input_window_time = model_input.input_window_time
             self.input_sampling_hz = model_input.input_sampling_hz
             self.input_window_samples = model_input.input_window_samples
             self.model_input_dimension = model_input.model_input_dimension
-        elif isinstance(model_input, ModelInputSpectrogram):
+        elif self.is_spectrogram:
             self.input_sampling_hz = model_input.input_sampling_hz
             self.spectrogram_preprocessing_config = model_input.spectrogram_preprocessing_config
+
+    @property
+    def is_1D(self):
+        return isinstance(self.model_input, ModelInput1D)
+
+    @property
+    def is_spectrogram(self):
+        return isinstance(self.model_input, ModelInputSpectrogram)
 
     def get_labels(self, id: str, start: int, end: int,
                    output_feature: str) -> pl.DataFrame | None:
@@ -749,9 +757,9 @@ class DataProcessor:
         return X, y 
 
     def preprocess_data_for_subject(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
-        if isinstance(self.model_input, ModelInput1D):
+        if self.is_1D:
             return self.get_1D_X_y(id)
-        elif isinstance(self.model_input, ModelInputSpectrogram):
+        elif self.is_spectrogram:
             return self.get_spectrogram_X_y(id)
         else:
             raise ValueError("ModelInput type not supported")
