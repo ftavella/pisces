@@ -1,4 +1,4 @@
-from pkg_resources import parse_version
+from pkg_resources import parse_version, resource_filename
 from configparser import ConfigParser
 import setuptools, shlex
 assert parse_version(setuptools.__version__)>=parse_version('36.2')
@@ -20,12 +20,8 @@ statuses = [ '1 - Planning', '2 - Pre-Alpha', '3 - Alpha',
     '4 - Beta', '5 - Production/Stable', '6 - Mature', '7 - Inactive' ]
 py_versions = '3.10 3.11'.split()
 
-# requirements = shlex.split(cfg.get('requirements', ''))
-# if cfg.get('pip_requirements'): requirements += shlex.split(cfg.get('pip_requirements', ''))
-
-with open('requirements.txt', encoding='utf-8') as f:
-    requirements = f.read().splitlines()
-
+requirements = cfg.get('requirements','').split()
+if cfg.get('pip_requirements'): requirements += cfg.get('pip_requirements','').split()
 min_python = cfg['min_python']
 lic = licenses.get(cfg['license'].lower(), (cfg['license'], None))
 dev_requirements = (cfg.get('dev_requirements') or '').split()
@@ -49,7 +45,9 @@ setuptools.setup(
     long_description_content_type = 'text/markdown',
     zip_safe = False,
     entry_points = {
-        'console_scripts': cfg.get('console_scripts','').split(),
+        'console_scripts': cfg.get('console_scripts','').split() + [
+            'pisces_setup = pisces.mads_olsen_support:pisces_setup',
+        ],
         'nbdev': [f'{cfg.get("lib_path")}={cfg.get("lib_path")}._modidx:d']
     },
     **setup_cfg)

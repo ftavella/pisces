@@ -7,65 +7,44 @@ __all__ = ['LOG_LEVEL', 'vec_to_WLDM', 'SimplifiablePrefixTree', 'IdExtractor', 
            'fill_gaps_in_accelerometer_data', 'DataProcessor']
 
 # %% ../nbs/01_data_sets.ipynb 4
-import importlib
+import os
+import re
+import logging
+import warnings
+import numpy as np
+import polars as pl
 from pathlib import Path
+from copy import deepcopy
 from enum import Enum, auto
 from functools import partial
+from collections import defaultdict
 from typing import Dict, List, Tuple
-from scipy.ndimage import gaussian_filter1d
 from .mads_olsen_support import *
+from typing import DefaultDict, Iterable
+from scipy.ndimage import gaussian_filter1d
+from .utils import determine_header_rows_and_delimiter
 
 # %% ../nbs/01_data_sets.ipynb 6
-from copy import deepcopy
-import warnings
-
 class SimplifiablePrefixTree:
-    """A standard prefix tree with the ability to "simplify" itself by combining nodes with only one child.
-
-    These also have the ability to "flatten" themselves, which means to convert all nodes at and below a certain depth into leaves on the most recent ancestor of that depth.
-
-    Parameters
-    ----------
-    delimiter : str
-        The delimiter to use when splitting words into characters. If empty, the words are treated as sequences of characters.
-    key : str
-        The key of the current node in its parent's `.children` dictionary. If empty, the node is (likely) the root of the tree.
-    
-    Attributes
-    ----------
-    key : str
-        The key of the current node in its parent's `.children` dictionary. If empty, the node is (likely) the root of the tree.
-    children : Dict[str, SimplifiablePrefixTree]
-        The children of the current node, stored in a dictionary with the keys being the children's keys.
-    is_end_of_word : bool
-        Whether the current node is the end of a word. Basically, is this a leaf node?
-    delimiter : str
-        The delimiter to use when splitting words into characters. If empty, the words are treated as sequences of characters.
-    print_spacer : str
-        The string to use to indent the printed tree.
-    
-    Methods
-    -------
-    chars_from(word: str) -> List[str]
-        Splits a word into characters, using the `delimiter` attribute as the delimiter.
-    insert(word: str) -> None
-        Inserts a word into the tree.
-    search(word: str) -> bool
-        Searches for a word in the tree.
-    simplified() -> SimplifiablePrefixTree
-        Returns a simplified copy of the tree. The original tree is not modified.
-    simplify() -> SimplifiablePrefixTree
-        Simplifies the tree in place.
-    reversed() -> SimplifiablePrefixTree
-        Returns a reversed copy of the tree, except with with `node.key` reversed versus the node in `self.children`. The original tree is not modified.
-    flattened(max_depth: int = 1) -> SimplifiablePrefixTree
-        Returns a Tree identical to `self` up to the given depth, but with all nodes at + below `max_depth` converted into leaves on the most recent acestor of lepth `max_depth - 1`.
-    _pushdown() -> List[SimplifiablePrefixTree]
-        Returns a list corresponding to the children of `self`, with `self.key` prefixed to each child's key.
-    print_tree(indent=0) -> str
-        Prints the tree, with indentation.
     """
-    def __init__(self, delimiter: str = "", key: str = ""):
+    A standard prefix tree with the ability to "simplify" itself by combining nodes with only one child.
+    These also have the ability to "flatten" themselves, which means to convert all nodes at and below a certain depth into leaves on the most recent ancestor of that depth.
+    """
+    def __init__(self, delimiter: str = "", # The delimiter to use when splitting words into characters. If empty, the words are treated as sequences of characters.
+                 key: str = "", # The key of the current node in its parent's `.children` dictionary. If empty, the node is (likely) the root of the tree.
+                 ):
+        """
+        key : str
+            The key of the current node in its parent's `.children` dictionary. If empty, the node is (likely) the root of the tree.
+        children : Dict[str, SimplifiablePrefixTree]
+            The children of the current node, stored in a dictionary with the keys being the children's keys.
+        is_end_of_word : bool
+            Whether the current node is the end of a word. Basically, is this a leaf node?
+        delimiter : str
+            The delimiter to use when splitting words into characters. If empty, the words are treated as sequences of characters.
+        print_spacer : str
+            The string to use to indent the printed tree.
+        """
         self.key = key
         self.children: Dict[str, SimplifiablePrefixTree] = {}
         self.is_end_of_word = False
@@ -73,9 +52,15 @@ class SimplifiablePrefixTree:
         self.print_spacer = "++"
     
     def chars_from(self, word: str):
+        """
+        Splits a word into characters, using the `delimiter` attribute as the delimiter.
+        """
         return word.split(self.delimiter) if self.delimiter else word
 
     def insert(self, word: str):
+        """
+        Inserts a word into the tree. If the word is already in the tree, nothing happens.
+        """
         node = self
         for char in self.chars_from(word):
             if char not in node.children:
@@ -84,6 +69,9 @@ class SimplifiablePrefixTree:
         node.is_end_of_word = True
 
     def search(self, word: str) -> bool:
+        """
+        Searches for a word in the tree.
+        """
         node = self
         for char in self.chars_from(word):
             if char not in node.children:
@@ -92,10 +80,16 @@ class SimplifiablePrefixTree:
         return node.is_end_of_word
     
     def simplified(self) -> 'SimplifiablePrefixTree':
+        """
+        Returns a simplified copy of the tree. The original tree is not modified.
+        """
         self_copy = deepcopy(self)
         return self_copy.simplify()
     
     def simplify(self):
+        """
+        Simplifies the tree in place.
+        """
         if len(self.children) == 1 and not self.is_end_of_word:
             child_key = list(self.children.keys())[0]
             self.key += child_key
@@ -110,12 +104,16 @@ class SimplifiablePrefixTree:
         return self
     
     def reversed(self) -> 'SimplifiablePrefixTree':
+        """
+        Returns a reversed copy of the tree, except with with `node.key` reversed versus the node in `self.children`. The original tree is not modified.
+        """
         rev_self = SimplifiablePrefixTree(self.delimiter, key=self.key[::-1])
         rev_self.children = {k[::-1]: v.reversed() for k, v in self.children.items()}
         return rev_self
     
     def flattened(self, max_depth: int = 1) -> 'SimplifiablePrefixTree':
-        """Returns a Tree identical to `self` up to the given depth, but with all nodes at + below `max_depth` converted into leaves on the most recent acestor of lepth `max_depth - 1`.
+        """
+        Returns a Tree identical to `self` up to the given depth, but with all nodes at + below `max_depth` converted into leaves on the most recent ancestor of depth `max_depth - 1`.
         """
         flat_self = SimplifiablePrefixTree(self.delimiter, key=self.key)
         if max_depth == 0:
@@ -136,7 +134,8 @@ class SimplifiablePrefixTree:
         return flat_self
     
     def _pushdown(self) -> List['SimplifiablePrefixTree']:
-        """Returns a list corresponding to the children of `self`, with `self.key` prefixed to each child's key.
+        """
+        Returns a list corresponding to the children of `self`, with `self.key` prefixed to each child's key.
         """
         pushed_down = [
             c
@@ -165,7 +164,8 @@ class SimplifiablePrefixTree:
 
 
 class IdExtractor(SimplifiablePrefixTree):
-    """Class extending the prefix trees that incorporates the algorithm for extracting IDs from a list of file names. The algorithm is somewhat oblique, so it's better to just use the `extract_ids` method versus trying to use the prfix trees directly at the call site.
+    """
+    Class extending the prefix trees that incorporates the algorithm for extracting IDs from a list of file names. The algorithm is somewhat oblique, so it's better to just use the `extract_ids` method versus trying to use the prfix trees directly at the call site.
     
     The algorithm is based on the assumption that the IDs are the same across all file names, but that the file names may have different suffixes. The algorithm reverses the file names, inserts them into the tree, and then simplifes and flattens that tree in order to find the IDs as leaves of that simplified tree.
 
@@ -198,16 +198,6 @@ class IdExtractor(SimplifiablePrefixTree):
     
 
 # %% ../nbs/01_data_sets.ipynb 11
-import os
-import re
-from typing import DefaultDict, Iterable
-from collections import defaultdict
-import logging
-
-import polars as pl
-import numpy as np
-from .utils import determine_header_rows_and_delimiter
-
 LOG_LEVEL = logging.INFO
 
 class DataSetObject:

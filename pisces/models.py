@@ -6,25 +6,27 @@ __all__ = ['SleepWakeClassifier', 'SGDLogisticRegression', 'MOResUNetPretrained'
 
 # %% ../nbs/02_models.ipynb 4
 import sys
+import abc
 import keras
+import warnings
 import numpy as np
 import polars as pl
 from tqdm import tqdm
+import multiprocessing
 from io import StringIO
-from pathlib import Path
-from enum import Enum, auto
+from typing import Type
 from itertools import repeat
 from typing import Dict, List, Tuple
+from sklearn.pipeline import Pipeline
+from .mads_olsen_support import *
+from .data_sets import DataSetObject
+from sklearn.linear_model import SGDClassifier
+from sklearn.model_selection import LeaveOneOut
+from sklearn.preprocessing import StandardScaler
+from concurrent.futures import ProcessPoolExecutor
 from .data_sets import DataSetObject, ModelInput1D, ModelInputSpectrogram, ModelOutputType, DataProcessor
 
 # %% ../nbs/02_models.ipynb 6
-import abc
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import SGDClassifier
-from sklearn.pipeline import Pipeline
-import numpy as np
-
-
 class SleepWakeClassifier(abc.ABC):
     """
     """
@@ -39,7 +41,6 @@ class SleepWakeClassifier(abc.ABC):
         pass
     def predict_probabilities(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         pass
-
 
 # %% ../nbs/02_models.ipynb 8
 class SGDLogisticRegression(SleepWakeClassifier):
@@ -130,15 +131,6 @@ class SGDLogisticRegression(SleepWakeClassifier):
         return self.model.predict_proba(self._input_preprocessing(sample_X))
 
 # %% ../nbs/02_models.ipynb 10
-from functools import partial
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
-import warnings
-
-from .mads_olsen_support import *
-from .utils import split_analysis
-
-
 class MOResUNetPretrained(SleepWakeClassifier):
     tf_model = load_saved_keras()
     config = MO_PREPROCESSING_CONFIG
@@ -181,6 +173,9 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Returns:
             List[Tuple[np.ndarray, np.ndarray] | None]: A list of tuples, where each tuple is the result of `get_needed_X_y` for a given ID. An empty list indicates an error occurred during processing.
         """
+        if not isinstance(data_processor.model_input, ModelInputSpectrogram):
+            raise ValueError("Model input must be set to Spectrogram on the data processor")
+
         results = []
         
         # Get the number of available CPU cores
@@ -320,11 +315,6 @@ class MOResUNetPretrained(SleepWakeClassifier):
         return evaluations, mo_preprocessed_data
 
 # %% ../nbs/02_models.ipynb 12
-from typing import Type
-from tqdm import tqdm
-from sklearn.model_selection import LeaveOneOut
-
-
 class SplitMaker:
     def split(self, ids: List[str]) -> Tuple[List[int], List[int]]:
         raise NotImplementedError
