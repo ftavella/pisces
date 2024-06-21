@@ -325,8 +325,6 @@ class DataSetObject:
     @classmethod
     def find_data_sets(cls, root: str | Path) -> Dict[str, 'DataSetObject']:
         root = str(root).replace("\\", "/") # Use consistent separators
-        if not root.endswith("/"):
-            root += "/"
 
         feature_dir_regex = rf".*/(.+)/{cls.FEATURE_PREFIX}(.+)/?"
 
