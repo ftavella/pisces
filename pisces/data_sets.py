@@ -347,12 +347,12 @@ class DataSetObject:
                     data_sets[data_set_name]._feature_map[feature_name] = {}
         return data_sets
 
-    def find_files(self,
-                   ignore_startswith: List=["."], # Ignore files starting with these strings
-                   ignore_endswith: List=[".tmp"], # Ignore files ending with these strings
-                   id_templates: Dict[str, str] | str | None=None, # The template for extracting IDs from the file names. A template per feature can be provided as a dictionary
-                   id_symbol: str="<<ID>>",
-                   ):
+    def parse_data_sets(self, 
+                        ignore_startswith: List=["."], # Ignore files starting with these strings 
+                        ignore_endswith: List=[".tmp"], # Ignore files ending with these strings 
+                        id_templates: Dict[str, str] | str | None=None, # The template for extracting IDs from the file names. A template per feature can be provided as a dictionary 
+                        id_symbol: str="<<ID>>",
+                        ):
         for feature in self.features:
             feature_path = self.get_feature_path(feature)
             if not feature_path.exists():
