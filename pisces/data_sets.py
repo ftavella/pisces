@@ -3,8 +3,8 @@
 # %% auto 0
 __all__ = ['LOG_LEVEL', 'vec_to_WLDM', 'SimplifiablePrefixTree', 'IdExtractor', 'DataSetObject', 'psg_to_sleep_wake', 'to_WLDM',
            'psg_to_WLDM', 'ModelOutputType', 'PSGType', 'ModelInput', 'ModelInput1D', 'ModelInputSpectrogram',
-           'find_overlapping_time_section', 'get_sample_weights', 'mask_psg_from_accel', 'apply_gausian_filter',
-           'fill_gaps_in_accelerometer_data', 'DataProcessor']
+           'get_sample_weights', 'mask_psg_from_accel', 'apply_gausian_filter', 'fill_gaps_in_accelerometer_data',
+           'DataProcessor']
 
 # %% ../nbs/01_data_sets.ipynb 4
 import os
@@ -325,6 +325,29 @@ class DataSetObject:
         
         return data_sets
 
+    def find_overlapping_time_section(
+        self,
+        features: List[str], # List of features included in the calculation, typically a combination of input and output features
+        id: str, # Subject id to process
+        ) -> Tuple[int, int]:
+        '''
+        Find common time interval when there's data for all features
+        '''
+        max_start = None
+        min_end = None
+        for feature in features:
+            data = self.get_feature_data(feature, id)
+            time = data[:, 0]
+            if max_start is None:
+                max_start = time.min()
+            else:
+                max_start = max([max_start, time.min()])
+            if min_end is None:
+                min_end = time.max()
+            else:
+                min_end = min([min_end, time.max()])
+        return (max_start, min_end)
+
 # %% ../nbs/01_data_sets.ipynb 13
 def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     """
@@ -381,16 +404,16 @@ class ModelInput:
                  input_features: List[str] | str,
                  input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
                  ):
+        # input_features
         if isinstance(input_features, str):
             input_features = [input_features]
+        self.input_features = input_features
         # input_sampling_hz
         if not isinstance(input_sampling_hz, (int, float)):
             raise ValueError("input_sampling_hz must be an int or a float")
         else:
             if input_sampling_hz <= 0:
                 raise ValueError("input_sampling_hz must be greater than 0")
-
-        self.input_features = input_features
         self.input_sampling_hz = float(input_sampling_hz)
 
 class ModelInput1D(ModelInput):
@@ -427,30 +450,6 @@ class ModelInputSpectrogram(ModelInput):
         self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
 # %% ../nbs/01_data_sets.ipynb 17
-def find_overlapping_time_section(
-     data_set: DataSetObject,
-     features: List[str], # List of features included in the calculation, typically a combination of input and output features
-     id: str, # Subject id to process
-     ) -> Tuple[int, int]:
-     '''
-     Find common time interval when there's data for all features
-     '''
-     max_start = None
-     min_end = None
-     for feature in features:
-          data = data_set.get_feature_data(feature, id)
-          time = data[:, 0]
-          if max_start is None:
-               max_start = time.min()
-          else:
-               max_start = max([max_start, time.min()])
-          if min_end is None:
-               min_end = time.max()
-          else:
-               min_end = min([min_end, time.max()])
-     return (max_start, min_end)
-
-
 def get_sample_weights(y: np.ndarray) -> np.ndarray:
      """
      Calculate sample weights based on the distribution of classes in the data.
@@ -634,9 +633,7 @@ class DataProcessor:
     def get_1D_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         # Find overlapping time section
         all_features = self.input_features + [self.output_feature]
-        max_start, min_end = find_overlapping_time_section(self.data_set, 
-                                                           all_features,
-                                                           id)
+        max_start, min_end = self.data_set.find_overlapping_time_section(all_features, id)
         # Get labels
         labels = self.get_labels(id, max_start, min_end, self.output_feature)
         label_times = labels[:, 0]
@@ -724,10 +721,7 @@ class DataProcessor:
     def get_spectrogram_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         # Find overlapping time section
         all_features = self.input_features + [self.output_feature]
-        max_start, min_end = find_overlapping_time_section(self.data_set, 
-                                                           all_features,
-                                                           id)
-
+        max_start, min_end = self.data_set.find_overlapping_time_section(all_features, id)
 
         if self.input_features != ['accelerometer']:
             raise ValueError("Spectrogram input only supported for accelerometer data")
