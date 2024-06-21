@@ -293,16 +293,19 @@ class DataSetObject:
     def get_feature_path(self, feature: str) -> Path:
         return self.path.joinpath(self.FEATURE_PREFIX + feature)
     
-    def _extract_ids(self, files: List[str]) -> List[str]:
-        return IdExtractor().extract_ids(files)
+    def _extract_ids(self, files: List[str],
+                     id_template: str | None=None,
+                     id_symbol: str="<<ID>>") -> List[str]:
+        return IdExtractor().extract_ids(files, id_template, id_symbol)
     
-    def add_feature_files(self, feature: str, files: Iterable[str]):
+    def add_feature_files(self, feature: str, files: Iterable[str],
+                          id_template: str | None=None, id_symbol: str="<<ID>>"):
         if feature not in self.features:
             self.logger.debug(f"Adding feature {feature} to {self.name}")
             self._feature_map[feature] = {}
         # use a set for automatic deduping
         deduped_ids = set(self.ids)
-        extracted_ids = sorted(self._extract_ids(files))
+        extracted_ids = sorted(self._extract_ids(files, id_template, id_symbol))
         files = sorted(list(files))
         # print('# extracted_ids:', len(extracted_ids))
         for id, file in zip(extracted_ids, files):
@@ -326,7 +329,9 @@ class DataSetObject:
     def find_data_sets(cls, 
                        root: str | Path,
                        ignore_startswith: List=["."], # Ignore files starting with these strings
-                       ignore_endswith: List=[".tmp"] # Ignore files ending with these strings
+                       ignore_endswith: List=[".tmp"], # Ignore files ending with these strings
+                       id_templates: Dict[str, str] | str | None=None, # The template for extracting IDs from the file names. A template per feature can be provided as a dictionary
+                       id_symbol: str="<<ID>>",
                        ) -> Dict[str, 'DataSetObject']:
         root = str(root).replace("\\", "/") # Use consistent separators
 
@@ -342,12 +347,16 @@ class DataSetObject:
                     data_set = DataSetObject(data_set_name, Path(root_dir).parent)
                     data_sets[data_set.name] = data_set
                 # Filter out unwanted files
+                relevant_files = []
                 for f in files:
                     ignore_start = any(f.startswith(prefix) for prefix in ignore_startswith)
                     ignore_end = any(f.endswith(suffix) for suffix in ignore_endswith)
                     if ignore_start or ignore_end:
                         continue
-                    relevant_files = [f for f in files]
-                data_set.add_feature_files(feature_name, relevant_files)
+                    relevant_files.append(f)
+
+                if isinstance(id_templates, dict):
+                    id_template = id_templates[feature_name]
+                data_set.add_feature_files(feature_name, relevant_files, id_template, id_symbol)
 
         return data_sets
