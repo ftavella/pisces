@@ -178,12 +178,12 @@ class IdExtractor(SimplifiablePrefixTree):
 
     def extract_ids(self, 
                     files: List[str], 
-                    id_template: str | None=None,
-                    id_symbol: str="<<ID>>") -> List[str]:
+                    id_template: str | None,
+                    id_symbol: str) -> List[str]:
         """
         Extracts IDs from a list of file names. If an ID template is provided, the algorithm will use that to extract the IDs. If not, the algorithm will extract the IDs based on the assumption that the files share a common structure.
         When providing an ID template, do it as follows: `"prefix" + id_symbol + "suffix"`. Either the prefix or suffix can be empty, but the `id_symbol` part must be present.
-        An id_symbol is used to separate the prefix and suffix from the ID. The default is `"<<ID>>"`.
+        An id_symbol is used to separate the prefix and suffix from the ID. 
         """
         if len(files) == 0:
             raise ValueError("Please provide at least one file name to extract IDs")
@@ -294,12 +294,12 @@ class DataSetObject:
         return self.path.joinpath(self.FEATURE_PREFIX + feature)
     
     def _extract_ids(self, files: List[str],
-                     id_template: str | None=None,
-                     id_symbol: str="<<ID>>") -> List[str]:
+                     id_template: str | None,
+                     id_symbol: str) -> List[str]:
         return IdExtractor().extract_ids(files, id_template, id_symbol)
     
     def add_feature_files(self, feature: str, files: Iterable[str],
-                          id_template: str | None=None, id_symbol: str="<<ID>>"):
+                          id_template: str | None, id_symbol: str):
         if feature not in self.features:
             self.logger.debug(f"Adding feature {feature} to {self.name}")
             self._feature_map[feature] = {}
@@ -328,10 +328,6 @@ class DataSetObject:
     @classmethod
     def find_data_sets(cls, 
                        root: str | Path,
-                       ignore_startswith: List=["."], # Ignore files starting with these strings
-                       ignore_endswith: List=[".tmp"], # Ignore files ending with these strings
-                       id_templates: Dict[str, str] | str | None=None, # The template for extracting IDs from the file names. A template per feature can be provided as a dictionary
-                       id_symbol: str="<<ID>>",
                        ) -> Dict[str, 'DataSetObject']:
         root = str(root).replace("\\", "/") # Use consistent separators
 
@@ -345,18 +341,34 @@ class DataSetObject:
                 feature_name = root_match.group(2)
                 if (data_set := data_sets.get(data_set_name)) is None:
                     data_set = DataSetObject(data_set_name, Path(root_dir).parent)
+                    data_set._feature_map[feature_name] = {}
                     data_sets[data_set.name] = data_set
-                # Filter out unwanted files
-                relevant_files = []
-                for f in files:
-                    ignore_start = any(f.startswith(prefix) for prefix in ignore_startswith)
-                    ignore_end = any(f.endswith(suffix) for suffix in ignore_endswith)
-                    if ignore_start or ignore_end:
-                        continue
-                    relevant_files.append(f)
-
-                if isinstance(id_templates, dict):
-                    id_template = id_templates[feature_name]
-                data_set.add_feature_files(feature_name, relevant_files, id_template, id_symbol)
-
+                else:
+                    data_sets[data_set_name]._feature_map[feature_name] = {}
         return data_sets
+
+    def find_files(self,
+                   ignore_startswith: List=["."], # Ignore files starting with these strings
+                   ignore_endswith: List=[".tmp"], # Ignore files ending with these strings
+                   id_templates: Dict[str, str] | str | None=None, # The template for extracting IDs from the file names. A template per feature can be provided as a dictionary
+                   id_symbol: str="<<ID>>",
+                   ):
+        for feature in self.features:
+            feature_path = self.get_feature_path(feature)
+            if not feature_path.exists():
+                warnings.warn(f"Feature path {feature_path} not found.")
+                continue
+            files = [f.name for f in feature_path.iterdir() if f.is_file()]
+            relevant_files = []
+            for f in files:
+                ignore_start = any(f.startswith(prefix) for prefix in ignore_startswith)
+                ignore_end = any(f.endswith(suffix) for suffix in ignore_endswith)
+                if ignore_start or ignore_end:
+                    continue
+                relevant_files.append(f)
+            if isinstance(id_templates, dict):
+                id_template = id_templates[feature]
+            else:
+                id_template = id_templates
+            self.add_feature_files(feature, relevant_files, id_template, id_symbol)
+
