@@ -559,12 +559,12 @@ def fill_gaps_in_accelerometer_data(acc: pl.DataFrame, smooth: bool = False, fin
 
 # %% ../nbs/01_data_sets.ipynb 18
 class DataProcessor:
-    def __init__(self, 
+    def __init__(self,
                  data_set: DataSetObject,
                  model_input: ModelInput,
                  output_feature: str='psg',
                  output_type: ModelOutputType=ModelOutputType.WAKE_LIGHT_DEEP_REM,
-                 psg_type: PSGType=PSGType.HAS_N4,
+                 psg_type: PSGType=PSGType.NO_N4,
                  ):
         self.data_set = data_set
         self.input_features = model_input.input_features
