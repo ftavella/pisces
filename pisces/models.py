@@ -101,17 +101,20 @@ class SGDLogisticRegression(SleepWakeClassifier):
         Xs = Xs[selector]
         ys = ys[selector]
 
-        # Get loss
+        loss_list = []
         old_stdout = sys.stdout
         sys.stdout = mystdout = StringIO()
         self.pipeline.fit(Xs, ys) # Fit the model
         sys.stdout = old_stdout
         loss_history = mystdout.getvalue()
-        loss_list = []
-        for line in loss_history.split('\n'):
-            if(len(line.split("loss: ")) == 1):
-                continue
-            loss_list.append(float(line.split("loss: ")[-1]))
+        # Get loss
+        try:
+            for line in loss_history.split('\n'):
+                if(len(line.split("loss: ")) == 1):
+                    continue
+                loss_list.append(float(line.split("loss: ")[-1]))
+        except:
+            warnings.warn("Failed to fetch loss history. Returning empty list.")
 
         return loss_list
     
