@@ -323,7 +323,11 @@ class DataSetObject:
             raise ValueError(f"Feature {feature} not found in {self.name}")
     
     @classmethod
-    def find_data_sets(cls, root: str | Path) -> Dict[str, 'DataSetObject']:
+    def find_data_sets(cls, 
+                       root: str | Path,
+                       ignore_startswith: List=["."], # Ignore files starting with these strings
+                       ignore_endswith: List=[".tmp"] # Ignore files ending with these strings
+                       ) -> Dict[str, 'DataSetObject']:
         root = str(root).replace("\\", "/") # Use consistent separators
 
         feature_dir_regex = rf".*/(.+)/{cls.FEATURE_PREFIX}(.+)/?"
@@ -334,12 +338,16 @@ class DataSetObject:
             if (root_match := re.match(feature_dir_regex, normalized_root_dir)):
                 data_set_name = root_match.group(1)
                 feature_name = root_match.group(2)
-                # TODO: I think this is the part that fails with only one subject
                 if (data_set := data_sets.get(data_set_name)) is None:
                     data_set = DataSetObject(data_set_name, Path(root_dir).parent)
                     data_sets[data_set.name] = data_set
                 # Filter out unwanted files
-                relevant_files = [f for f in files if not f.startswith(".") and not f.endswith(".tmp")]
+                for f in files:
+                    ignore_start = any(f.startswith(prefix) for prefix in ignore_startswith)
+                    ignore_end = any(f.endswith(suffix) for suffix in ignore_endswith)
+                    if ignore_start or ignore_end:
+                        continue
+                    relevant_files = [f for f in files]
                 data_set.add_feature_files(feature_name, relevant_files)
 
         return data_sets
