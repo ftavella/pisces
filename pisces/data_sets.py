@@ -176,10 +176,14 @@ class IdExtractor(SimplifiablePrefixTree):
     def __init__(self, delimiter: str = "", key: str = ""):
         super().__init__(delimiter, key)
 
-    def extract_ids(self, files: List[str], id_template: str | None=None) -> List[str]:
+    def extract_ids(self, 
+                    files: List[str], 
+                    id_template: str | None=None,
+                    id_symbol: str="<<ID>>") -> List[str]:
         """
         Extracts IDs from a list of file names. If an ID template is provided, the algorithm will use that to extract the IDs. If not, the algorithm will extract the IDs based on the assumption that the files share a common structure.
-        When providing an ID template, do it as follows: `"prefix<<ID>>suffix"`. Either the prefix or suffix can be empty, but the `<<ID>>` part must be present.
+        When providing an ID template, do it as follows: `"prefix" + id_symbol + "suffix"`. Either the prefix or suffix can be empty, but the `id_symbol` part must be present.
+        An id_symbol is used to separate the prefix and suffix from the ID. The default is `"<<ID>>"`.
         """
         if len(files) == 0:
             raise ValueError("Please provide at least one file name to extract IDs")
@@ -189,8 +193,7 @@ class IdExtractor(SimplifiablePrefixTree):
                 raise ValueError("Please provide an ID template if you only have one file name.")
             else:
                 file = files[0]
-                prefix = id_template[:id_template.find("<<")]
-                suffix = id_template[id_template.find(">>")+2:]
+                prefix, suffix = id_template.split(id_symbol)
                 id_str = file.replace(prefix, "").replace(suffix, "")
                 return [id_str]
 
@@ -207,8 +210,7 @@ class IdExtractor(SimplifiablePrefixTree):
         else:
             ids = []
             for file in files:
-                prefix = id_template[:id_template.find("<<")]
-                suffix = id_template[id_template.find(">>")+2:]
+                prefix, suffix = id_template.split(id_symbol)
                 id_str = file.replace(prefix, "").replace(suffix, "")
                 ids.append(id_str)
             
@@ -218,7 +220,7 @@ class IdExtractor(SimplifiablePrefixTree):
         return self.simplified().flattened(1).reversed()
     
 
-# %% ../nbs/01_data_sets.ipynb 9
+# %% ../nbs/01_data_sets.ipynb 10
 LOG_LEVEL = logging.INFO
 
 class DataSetObject:
