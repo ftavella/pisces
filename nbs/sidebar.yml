@@ -1,12 +1,13 @@
 website:
   sidebar:
+    collapse-level: 1
     contents:
-    - text: "Welcome"
-      file: index.ipynb
-    - section: Examples
-      contents:
-        - auto: "examples/*"
-    - section: "User Guide"
-      contents:
-        - auto: "api/*"
-    border: True
+      - text: "Welcome"
+        file: index.ipynb
+      - section: API
+        contents:
+          - auto: "api/*"
+      - section: Examples
+        contents:
+          - auto: "examples/*"
+        border: true
