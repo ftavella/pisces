@@ -2,7 +2,7 @@ project:
   output-dir: _docs
 
 website:
-  title: "pisces"
+  title: "pisces by Arcascope"
   site-url: "https://Arcascope.github.io/pisces"
   description: "Pipeline for sleep classification and evaluation"
   repo-branch: main

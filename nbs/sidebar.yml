@@ -1,6 +1,12 @@
 website:
   sidebar:
     contents:
-      - index.ipynb
-      - 00_utils.ipynb
-      - 05_experiments.ipynb
+    - text: "Welcome"
+      file: index.ipynb
+    - section: Examples
+      contents:
+        - auto: "examples/*"
+    - section: "User Guide"
+      contents:
+        - auto: "api/*"
+    border: True
