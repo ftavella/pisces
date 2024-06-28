@@ -16,6 +16,7 @@ import multiprocessing
 from io import StringIO
 from typing import Type
 from itertools import repeat
+from scipy.special import softmax
 from typing import Dict, List, Tuple
 from sklearn.pipeline import Pipeline
 from .mads_olsen_support import *
@@ -268,7 +269,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
     def predict_probabilities(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         if isinstance(sample_X, pl.DataFrame):
             sample_X = sample_X.to_numpy()
-        return self._evaluate_tf_model(sample_X)[0]
+        return softmax(self._evaluate_tf_model(sample_X)[0])
 
     def _evaluate_tf_model(self, inputs: np.ndarray) -> np.ndarray:
         inputs = inputs.astype(np.float32)
