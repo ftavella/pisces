@@ -269,7 +269,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
     def predict_probabilities(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         if isinstance(sample_X, pl.DataFrame):
             sample_X = sample_X.to_numpy()
-        return softmax(self._evaluate_tf_model(sample_X)[0])
+        return softmax(self._evaluate_tf_model(sample_X)[0], axis=1)
 
     def _evaluate_tf_model(self, inputs: np.ndarray) -> np.ndarray:
         inputs = inputs.astype(np.float32)
