@@ -361,6 +361,7 @@ def run_splits(split_maker: SplitMaker,
                swc_class: Type[SleepWakeClassifier], 
                epochs: int,
                exclude: List[str] = [],
+               linear_model: LinearModel | None = None,
                ) -> Tuple[
                    List[SleepWakeClassifier], 
                    List[np.ndarray], 
@@ -371,7 +372,15 @@ def run_splits(split_maker: SplitMaker,
     split_results = []
     splits = []
 
-    swc = swc_class(data_processor, epochs=epochs)
+    if swc_class == SGDLinearClassifier and not linear_model:
+        raise ValueError("Must provide a linear model for SGDLinearClassifier")
+    elif not swc_class == SGDLinearClassifier and linear_model:
+        raise ValueError("Linear model provided but not using SGDLinearClassifier")
+    elif swc_class == SGDLinearClassifier and linear_model:
+        swc = swc_class(data_processor, linear_model, 
+                        epochs=epochs)
+    else:
+        swc = swc_class(data_processor, epochs=epochs)
 
     ids_to_split = [id for id in data_processor.data_set.ids if id not in exclude]
     tqdm_message_preprocess = f"Preparing data for {len(ids_to_split)} IDs"
@@ -382,9 +391,15 @@ def run_splits(split_maker: SplitMaker,
     for train_index, test_index in tqdm(all_splits, desc=tqdm_message_train, total=len(ids_to_split)):
         if preprocessed_data[test_index[0]][0] is None:
             continue
+        if swc_class == SGDLinearClassifier:
+            swc = swc_class(data_processor, linear_model, 
+                            epochs=epochs)
+        else:
+            swc = swc_class(data_processor, epochs=epochs)
+
         model, result = run_split(train_indices=train_index, 
                                   preprocessed_data_set=preprocessed_data, 
-                                  swc=swc_class(data_processor, epochs=epochs), 
+                                  swc=swc,
                                   epochs=epochs)
         split_models.append(model)
         split_results.append(result)
