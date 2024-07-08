@@ -46,7 +46,7 @@ class SleepWakeClassifier(abc.ABC):
 # %% ../nbs/02_models.ipynb 8
 class LinearModel(Enum):
     """Defines the loss used in sklearn's SGDClassifier which defines the linear model used for classification."""
-    LOGISTIC_REGRESSION = 'log'
+    LOGISTIC_REGRESSION = 'log_loss'
     PERCEPTRON = 'perceptron'
     SVM = 'hinge'
 
@@ -145,7 +145,16 @@ class SGDLinearClassifier(SleepWakeClassifier):
         """
         Assumes data is already preprocessed using `get_needed_X_y`
         """
-        return self.model.predict_proba(self._input_preprocessing(sample_X))
+        if hasattr(self.model, 'predict_proba'):
+            return self.model.predict_proba(self._input_preprocessing(sample_X))
+        elif hasattr(self.model, 'decision_function'):
+            warnings.warn("Model does not have `predict_proba`. Using `decision_function` instead.")
+            binary_decision = self.model.decision_function(self._input_preprocessing(sample_X))
+            prediction = binary_decision > 0
+            return np.vstack([1 - prediction, prediction]).T
+
+        else:
+            raise ValueError("Model must have either `predict_proba` or `decision_function`")
 
 # %% ../nbs/02_models.ipynb 11
 class MOResUNetPretrained(SleepWakeClassifier):
