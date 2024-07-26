@@ -140,7 +140,7 @@ class SGDLinearClassifier(SleepWakeClassifier):
     """
     def __init__(self, 
                  data_processor: DataProcessor, 
-                 linear_model: LinearModel,
+                 linear_model: LinearModel=LinearModel.LOGISTIC_REGRESSION,
                  **kwargs):
         self.model = SGDClassifier(loss=linear_model.value, **kwargs)
         self.scaler = StandardScaler()
