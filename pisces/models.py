@@ -141,21 +141,8 @@ class SGDLinearClassifier(SleepWakeClassifier):
     def __init__(self, 
                  data_processor: DataProcessor, 
                  linear_model: LinearModel,
-                 lr: float = 0.15, 
-                 epochs: int = 100,
-                 learning_rate: str = 'adaptive',
-                 penalty: str = 'l1',
-                 class_weight: str = 'balanced',
-                 warm_start: bool = True,
-                 verbose: int = 1):
-        self.model = SGDClassifier(loss=linear_model.value,
-                                   learning_rate=learning_rate,
-                                   penalty=penalty,
-                                   eta0=lr,
-                                   class_weight=class_weight,
-                                   max_iter=epochs,
-                                   warm_start=warm_start,
-                                   verbose=verbose)
+                 **kwargs):
+        self.model = SGDClassifier(loss=linear_model.value, **kwargs)
         self.scaler = StandardScaler()
         self.pipeline = Pipeline([('scaler', self.scaler), ('model', self.model)])
         if not isinstance(data_processor.model_input, ModelInput1D):
