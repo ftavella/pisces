@@ -17,6 +17,7 @@ from io import StringIO
 from typing import Type
 from enum import Enum, auto
 from itertools import repeat
+from scipy.special import softmax
 from fastcore.basics import patch_to
 from typing import Dict, List, Tuple
 from sklearn.pipeline import Pipeline
@@ -307,7 +308,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
     def predict_probabilities(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         if isinstance(sample_X, pl.DataFrame):
             sample_X = sample_X.to_numpy()
-        return self._evaluate_tf_model(sample_X)[0]
+        return softmax(self._evaluate_tf_model(sample_X)[0], axis=1)
 
     def _evaluate_tf_model(self, inputs: np.ndarray) -> np.ndarray:
         inputs = inputs.astype(np.float32)
