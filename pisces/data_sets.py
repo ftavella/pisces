@@ -751,11 +751,7 @@ class DataProcessor:
                 data = acc[:, i]
                 processed_data.append(fn_args(data))
 
-        spec = np.zeros_like(processed_data[0])
-        for data in processed_data:
-            spec += data
-        
-        spec = spec / len(indexes_to_use)
+        spec = sum(processed_data) / len(processed_data)
 
         return spec
 
