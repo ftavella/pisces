@@ -11,24 +11,23 @@ import keras
 import warnings
 import numpy as np
 import polars as pl
+from enum import Enum
 from tqdm import tqdm
 import multiprocessing
 from io import StringIO
 from typing import Type
-from enum import Enum, auto
 from itertools import repeat
 from scipy.special import softmax
 from fastcore.basics import patch_to
 from typing import Dict, List, Tuple
 from sklearn.pipeline import Pipeline
 from .mads_olsen_support import *
-from .data_sets import DataSetObject
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.ensemble import RandomForestClassifier
-from .data_sets import DataSetObject, ModelInput1D, ModelInputSpectrogram, ModelOutputType, DataProcessor
+from .data_sets import ModelInput1D, ModelInputSpectrogram, ModelOutputType, DataProcessor
 
 # %% ../nbs/02_models.ipynb 6
 class SleepWakeClassifier(abc.ABC):
@@ -215,7 +214,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Prepare the data set for training.
 
         Args:
-            data_set (DataSetObject): The data set to prepare for training.
+            data_processor (DataProcessor): The data set to prepare for training.
             ids (List[str], optional): The IDs to prepare. Defaults to None.
             max_workers (int, optional): The number of workers to use for parallel processing. Defaults to None, which uses all available cores. Setting to a negative number leaves that many cores unused. For example, if my machine has 4 cores and I set max_workers to -1, then 3 = 4 - 1 cores will be used; if max_workers=-3 then 1 = 4 - 3 cores are used.
 
