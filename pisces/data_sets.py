@@ -24,7 +24,7 @@ from typing import DefaultDict, Iterable
 from scipy.ndimage import gaussian_filter1d
 from .utils import determine_header_rows_and_delimiter
 
-# %% ../nbs/01_data_sets.ipynb 6
+# %% ../nbs/01_data_sets.ipynb 7
 class SimplifiablePrefixTree:
     """
     A standard prefix tree with the ability to "simplify" itself by combining nodes with only one child.
@@ -227,7 +227,7 @@ class IdExtractor(SimplifiablePrefixTree):
         return self.simplified().flattened(1).reversed()
     
 
-# %% ../nbs/01_data_sets.ipynb 12
+# %% ../nbs/01_data_sets.ipynb 13
 LOG_LEVEL = logging.INFO
 
 class DataSetObject:
@@ -402,7 +402,7 @@ class DataSetObject:
                 min_end = min([min_end, time.max()])
         return (max_start, min_end)
 
-# %% ../nbs/01_data_sets.ipynb 14
+# %% ../nbs/01_data_sets.ipynb 15
 def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     """
     * map all positive classes to 1 (sleep)
@@ -444,7 +444,7 @@ def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
     """
     return vec_to_WLDM(psg[:, 1].to_numpy(), N4)
 
-# %% ../nbs/01_data_sets.ipynb 17
+# %% ../nbs/01_data_sets.ipynb 18
 class ModelOutputType(Enum):
     SLEEP_WAKE = auto()
     WAKE_LIGHT_DEEP_REM = auto()
@@ -503,7 +503,7 @@ class ModelInputSpectrogram(ModelInput):
         self.input_sampling_hz = float(input_sampling_hz)
         self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
-# %% ../nbs/01_data_sets.ipynb 19
+# %% ../nbs/01_data_sets.ipynb 20
 def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     """
     * map all positive classes to 1 (sleep)
@@ -545,7 +545,7 @@ def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
     """
     return vec_to_WLDM(psg[:, 1].to_numpy(), N4)
 
-# %% ../nbs/01_data_sets.ipynb 22
+# %% ../nbs/01_data_sets.ipynb 23
 class ModelOutputType(Enum):
     SLEEP_WAKE = auto()
     WAKE_LIGHT_DEEP_REM = auto()
@@ -604,7 +604,7 @@ class ModelInputSpectrogram(ModelInput):
         self.input_sampling_hz = float(input_sampling_hz)
         self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
-# %% ../nbs/01_data_sets.ipynb 23
+# %% ../nbs/01_data_sets.ipynb 24
 def get_sample_weights(y: np.ndarray) -> np.ndarray:
      """
      Calculate sample weights based on the distribution of classes in the data.
@@ -712,7 +712,7 @@ def fill_gaps_in_accelerometer_data(acc: pl.DataFrame, smooth: bool = False, fin
 
     return acc_resampled
 
-# %% ../nbs/01_data_sets.ipynb 24
+# %% ../nbs/01_data_sets.ipynb 25
 class DataProcessor:
     def __init__(self,
                  data_set: DataSetObject,
