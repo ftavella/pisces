@@ -35,30 +35,35 @@ class SleepWakeClassifier(abc.ABC):
     """ Abstract class for sleep/wake classifiers. 
     """
     @abc.abstractmethod
-    def __init__(self, model=None, data_processor=None):
+    def __init__(self, model=None, data_processor=None,
+                 scaler_pipeline_name: str='scaler', 
+                 model_pipeline_name: str='model'):
         self.model = model
-        self.scaler = StandardScaler()
-        self.pipeline = Pipeline([('scaler', self.scaler), ('model', self.model)])
+        self.scaler_pipeline_name = scaler_pipeline_name
+        self.model_pipeline_name = model_pipeline_name
+        self.pipeline = Pipeline([(scaler_pipeline_name, StandardScaler()), 
+                                  (model_pipeline_name, self.model)])
         self.data_processor = data_processor
 
     def _input_preprocessing(self, X: np.ndarray) -> np.ndarray:
-        return self.scaler.transform(X)
+        return self.pipeline.named_steps[self.scaler_pipeline_name].transform(X)
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         """
         Assumes data is already preprocessed using `get_needed_X_y`
         """
-        return self.model.predict(self._input_preprocessing(sample_X))
+        return self.pipeline.predict(self._input_preprocessing(sample_X))
 
     def predict_probabilities(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         """
         Assumes data is already preprocessed using `get_needed_X_y`
         """
-        if hasattr(self.model, 'predict_proba'):
-            return self.model.predict_proba(self._input_preprocessing(sample_X))
-        elif hasattr(self.model, 'decision_function'):
+        model = self.pipeline.named_steps[self.model_pipeline_name]
+        if hasattr(model, 'predict_proba'):
+            return model.predict_proba(self._input_preprocessing(sample_X))
+        elif hasattr(model, 'decision_function'):
             warnings.warn("Model does not have `predict_proba`. Using `decision_function` instead.")
-            binary_decision = self.model.decision_function(self._input_preprocessing(sample_X))
+            binary_decision = model.decision_function(self._input_preprocessing(sample_X))
             prediction = binary_decision > 0
             return np.vstack([1 - prediction, prediction]).T
 
@@ -143,9 +148,10 @@ class SGDLinearClassifier(SleepWakeClassifier):
                  data_processor: DataProcessor, 
                  linear_model: LinearModel=LinearModel.LOGISTIC_REGRESSION,
                  **kwargs):
-        self.model = SGDClassifier(loss=linear_model.value, **kwargs)
-        self.scaler = StandardScaler()
-        self.pipeline = Pipeline([('scaler', self.scaler), ('model', self.model)])
+        super().__init__(
+            model=SGDClassifier(loss=linear_model.value, **kwargs),
+            data_processor=data_processor
+        )
         if not isinstance(data_processor.model_input, ModelInput1D):
             raise ValueError("Model input must be set to 1D on the data processor")
         if not data_processor.output_type == ModelOutputType.SLEEP_WAKE:
@@ -162,10 +168,10 @@ class RandomForest(SleepWakeClassifier):
                  data_processor: DataProcessor,
                  class_weight: str = 'balanced',
                  **kwargs):
-        self.model = RandomForestClassifier(class_weight=class_weight,
-                                            **kwargs)
-        self.scaler = StandardScaler()
-        self.pipeline = Pipeline([('scaler', self.scaler), ('model', self.model)])
+        super().__init__(
+            model=RandomForestClassifier(class_weight=class_weight, **kwargs),
+            data_processor=data_processor
+        )
         if not isinstance(data_processor.model_input, ModelInput1D):
             raise ValueError("Model input must be set to 1D on the data processor")
         self.data_processor = data_processor
