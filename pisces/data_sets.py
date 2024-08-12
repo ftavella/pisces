@@ -439,7 +439,7 @@ def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
     If N4 is False:
         - 1, 2 => 1 (light sleep)
         - 3 => 2 (deep sleep)
-        - 5 => 3 (REM)
+        - 4 => 3 (REM)
     * retain all 0 (wake) and -1 (mask) classes
     """
     return vec_to_WLDM(psg[:, 1].to_numpy(), N4)

@@ -410,13 +410,8 @@ def run_splits(split_maker: SplitMaker,
         raise ValueError("Must provide a linear model for SGDLinearClassifier")
     elif not swc_class == SGDLinearClassifier and linear_model:
         raise ValueError("Linear model provided but not using SGDLinearClassifier")
-    elif swc_class == SGDLinearClassifier and linear_model:
-        swc = swc_class(data_processor, linear_model, 
-                        epochs=epochs)
-    elif swc_class == RandomForest:
-        swc = swc_class(data_processor)
-    else:
-        swc = swc_class(data_processor, epochs=epochs)
+
+    swc = swc_class(data_processor, linear_model=linear_model, epochs=epochs)
 
     ids_to_split = [id for id in data_processor.data_set.ids if id not in exclude]
     tqdm_message_preprocess = f"Preparing data for {len(ids_to_split)} IDs"
