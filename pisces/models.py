@@ -294,13 +294,13 @@ class MOResUNetPretrained(SleepWakeClassifier):
         ys_c = np.concatenate(ys, axis=0)
         weights = np.concatenate(weights, axis=0)
 
-        self.tf_model.compile(
+        self.model.compile(
             optimizer=keras.optimizers.RMSprop(learning_rate=lr), 
             loss=keras.losses.SparseCategoricalCrossentropy(),
             metrics=[keras.metrics.SparseCategoricalAccuracy()],
             weighted_metrics=[])
 
-        fit_result = self.tf_model.fit(
+        fit_result = self.model.fit(
             Xs_c, ys_c * weights, batch_size=batch_size, epochs=epochs,
             sample_weight=weights, validation_split=validation_split,)
 
@@ -316,7 +316,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
 
     def _evaluate_tf_model(self, inputs: np.ndarray) -> np.ndarray:
         inputs = inputs.astype(np.float32)
-        preds = self.tf_model.predict(inputs)
+        preds = self.model.predict(inputs)
         return preds
 
     def evaluate_data_set(self, 
