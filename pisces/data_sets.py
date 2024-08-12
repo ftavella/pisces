@@ -3,8 +3,8 @@
 # %% auto 0
 __all__ = ['LOG_LEVEL', 'vec_to_WLDM', 'SimplifiablePrefixTree', 'IdExtractor', 'DataSetObject', 'psg_to_sleep_wake', 'to_WLDM',
            'psg_to_WLDM', 'ModelOutputType', 'PSGType', 'ModelInput', 'ModelInput1D', 'ModelInputSpectrogram',
-           'get_sample_weights', 'mask_psg_from_accel', 'find_overlapping_time_section', 'apply_gausian_filter',
-           'fill_gaps_in_accelerometer_data', 'DataProcessor']
+           'get_sample_weights', 'mask_psg_from_accel', 'apply_gausian_filter', 'fill_gaps_in_accelerometer_data',
+           'DataProcessor']
 
 # %% ../nbs/01_data_sets.ipynb 4
 import os
@@ -503,82 +503,7 @@ class ModelInputSpectrogram(ModelInput):
         self.input_sampling_hz = float(input_sampling_hz)
         self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
-# %% ../nbs/01_data_sets.ipynb 18
-def get_sample_weights(y: np.ndarray) -> np.ndarray:
-     """
-     Calculate sample weights based on the distribution of classes in the data.
-     Doesn't count masked values (-1) in the class distribution.
-     """
-     # Filter out -1 values
-     valid_y = y[y != -1]
-     # Calculate class counts for valid labels only
-     class_counts = np.bincount(valid_y)
-     class_weights = np.where(class_counts > 0, class_counts.sum() / class_counts, 0)
-     # Map valid class weights to corresponding samples in y
-     sample_weights = np.zeros_like(y, dtype=float)
-     for class_index, weight in enumerate(class_weights):
-          sample_weights[y == class_index] = weight
-     # Masked values (-1) in y will have a weight of 0
-     return sample_weights
-
-
-def mask_psg_from_accel(psg: np.ndarray, accel: np.ndarray, 
-                        psg_epoch: int = 30,
-                        accel_sample_rate: float | None = None,
-                        min_epoch_fraction_covered: float = 0.5
-                        ) -> np.ndarray:
-
-    acc_last_index = 0
-    acc_next_index = acc_last_index
-    acc_last_time = accel[acc_last_index, 0]
-    acc_next_time = acc_last_time
-
-    # at least this fraction of 1 epoch must be covered
-    # both in terms of time (no gap longer than 0.5 epochs)
-    # and in terms of expected number of samples in that time.
-    min_epoch_covered = min_epoch_fraction_covered * psg_epoch
-    if accel_sample_rate is None:
-        # median sample step size, if none provided
-        # median to not take into account gaps!
-        accel_sample_rate = np.median(np.diff(accel[:, 0]))
-    min_samples_per = min_epoch_covered / accel_sample_rate
-
-    psg_gap_indices = []
-
-    for (psg_index, psg_sample) in enumerate(psg):
-        epoch_ends = psg_sample[0] + psg_epoch
-
-        # find the last timestamp inside the epoch
-        while (acc_next_time <= epoch_ends and acc_next_index < len(accel)):
-            acc_next_time = accel[acc_next_index, 0]
-            acc_next_index += 1
-        
-        return data_sets
-
-def find_overlapping_time_section(
-        self,
-        features: List[str], # List of features included in the calculation, typically a combination of input and output features
-        id: str, # Subject id to process
-        ) -> Tuple[int, int]:
-        '''
-        Find common time interval when there's data for all features
-        '''
-        max_start = None
-        min_end = None
-        for feature in features:
-            data = self.get_feature_data(feature, id)
-            time = data[:, 0]
-            if max_start is None:
-                max_start = time.min()
-            else:
-                max_start = max([max_start, time.min()])
-            if min_end is None:
-                min_end = time.max()
-            else:
-                min_end = min([min_end, time.max()])
-        return (max_start, min_end)
-
-# %% ../nbs/01_data_sets.ipynb 20
+# %% ../nbs/01_data_sets.ipynb 19
 def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     """
     * map all positive classes to 1 (sleep)
@@ -620,7 +545,7 @@ def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
     """
     return vec_to_WLDM(psg[:, 1].to_numpy(), N4)
 
-# %% ../nbs/01_data_sets.ipynb 23
+# %% ../nbs/01_data_sets.ipynb 22
 class ModelOutputType(Enum):
     SLEEP_WAKE = auto()
     WAKE_LIGHT_DEEP_REM = auto()
@@ -679,7 +604,7 @@ class ModelInputSpectrogram(ModelInput):
         self.input_sampling_hz = float(input_sampling_hz)
         self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
-# %% ../nbs/01_data_sets.ipynb 24
+# %% ../nbs/01_data_sets.ipynb 23
 def get_sample_weights(y: np.ndarray) -> np.ndarray:
      """
      Calculate sample weights based on the distribution of classes in the data.
@@ -787,7 +712,7 @@ def fill_gaps_in_accelerometer_data(acc: pl.DataFrame, smooth: bool = False, fin
 
     return acc_resampled
 
-# %% ../nbs/01_data_sets.ipynb 25
+# %% ../nbs/01_data_sets.ipynb 24
 class DataProcessor:
     def __init__(self,
                  data_set: DataSetObject,
