@@ -27,6 +27,7 @@ from sklearn.model_selection import LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.ensemble import RandomForestClassifier
+from .mads_olsen_support import load_saved_keras
 from .data_sets import ModelInput1D, ModelInputSpectrogram, ModelOutputType, DataProcessor
 
 # %% ../nbs/02_models.ipynb 6
@@ -185,28 +186,27 @@ class MOResUNetPretrained(SleepWakeClassifier):
 
     def __init__(
         self,
-        sampling_hz: int = FS,
-        tf_model: keras.Model = None,
-    ) -> None:
+        data_processor: DataProcessor,
+        model: keras.Model = None,
+        **kwargs) -> None:
         """
         Initialize the MOResUNetPretrained classifier.
 
         Args:
-            sampling_hz (int, optional): The sampling frequency in Hz. Defaults to FS.
-            tf_model (keras.Model, optional): The TensorFlow model to use. Defaults to None, in which case the model is loaded from disk.
+            data_processor (DataProcessor): The data processor to use.
+            model (keras.Model, optional): The TensorFlow model to use. Defaults to None, in which case the model is loaded from disk.
         """
-        super().__init__()
-        self.sampling_hz = sampling_hz
-        self._tf_model = tf_model
+        if model is None:
+            tf_model = load_saved_keras()
+        else:
+            tf_model = model
 
-    @property
-    def tf_model(self) -> keras.Model:
-        if self._tf_model is None:
-            self._tf_model = load_saved_keras()
-        return self._tf_model
+        super().__init__(
+            model=tf_model,
+            data_processor=data_processor,
+        )
 
     def prepare_set_for_training(self, 
-                                 data_processor: DataProcessor, 
                                  ids: List[str],
                                  max_workers: int | None = None 
                                  ) -> List[Tuple[np.ndarray, np.ndarray] | None]:
@@ -214,14 +214,13 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Prepare the data set for training.
 
         Args:
-            data_processor (DataProcessor): The data set to prepare for training.
             ids (List[str], optional): The IDs to prepare. Defaults to None.
             max_workers (int, optional): The number of workers to use for parallel processing. Defaults to None, which uses all available cores. Setting to a negative number leaves that many cores unused. For example, if my machine has 4 cores and I set max_workers to -1, then 3 = 4 - 1 cores will be used; if max_workers=-3 then 1 = 4 - 3 cores are used.
 
         Returns:
             List[Tuple[np.ndarray, np.ndarray] | None]: A list of tuples, where each tuple is the result of `get_needed_X_y` for a given ID. An empty list indicates an error occurred during processing.
         """
-        if not isinstance(data_processor.model_input, ModelInputSpectrogram):
+        if not isinstance(self.data_processor.model_input, ModelInputSpectrogram):
             raise ValueError("Model input must be set to Spectrogram on the data processor")
 
         results = []
@@ -246,15 +245,15 @@ class MOResUNetPretrained(SleepWakeClassifier):
                 tqdm(
                     executor.map(
                         self.get_needed_X_y,
-                        repeat(data_processor),
+                        repeat(self.data_processor),
                         ids,
                     ), total=len(ids), desc="Preparing data..."
                 ))
 
         return results
 
-    def get_needed_X_y(self, data_processor: DataProcessor, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
-        return data_processor.get_spectrogram_X_y(id)
+    def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
+        return self.data_processor.get_spectrogram_X_y(id)
 
     def train(self, 
               examples_X: List[pl.DataFrame] = [], 
@@ -321,17 +320,16 @@ class MOResUNetPretrained(SleepWakeClassifier):
         return preds
 
     def evaluate_data_set(self, 
-                          data_processor: DataProcessor, 
                           exclude: List[str] = [], 
                           max_workers: int = None) -> Tuple[Dict[str, dict], list]:
-        data_set = data_processor.data_set
+        data_set = self.data_processor.data_set
         filtered_ids = [id for id in data_set.ids if id not in exclude]
         # Prepare the data
         print("Preprocessing data...")
         mo_preprocessed_data = [
             (d, i) 
             for (d, i) in zip(
-                self.prepare_set_for_training(data_processor, filtered_ids, max_workers=max_workers),
+                self.prepare_set_for_training(self.data_processor, filtered_ids, max_workers=max_workers),
                 filtered_ids) 
             if d is not None
         ]
