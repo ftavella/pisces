@@ -3,8 +3,8 @@
 # %% auto 0
 __all__ = ['LOG_LEVEL', 'vec_to_WLDM', 'SimplifiablePrefixTree', 'IdExtractor', 'DataSetObject', 'psg_to_sleep_wake', 'to_WLDM',
            'psg_to_WLDM', 'ModelOutputType', 'PSGType', 'ModelInput', 'ModelInput1D', 'ModelInputSpectrogram',
-           'get_sample_weights', 'mask_psg_from_accel', 'apply_gausian_filter', 'fill_gaps_in_accelerometer_data',
-           'DataProcessor']
+           'get_sample_weights', 'mask_psg_from_accel', 'find_overlapping_time_section', 'apply_gausian_filter',
+           'fill_gaps_in_accelerometer_data', 'DataProcessor']
 
 # %% ../nbs/01_data_sets.ipynb 4
 import os
@@ -555,7 +555,7 @@ def mask_psg_from_accel(psg: np.ndarray, accel: np.ndarray,
         
         return data_sets
 
-    def find_overlapping_time_section(
+def find_overlapping_time_section(
         self,
         features: List[str], # List of features included in the calculation, typically a combination of input and output features
         id: str, # Subject id to process
