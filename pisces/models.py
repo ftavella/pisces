@@ -32,10 +32,9 @@ from .mads_olsen_support import load_saved_keras
 from .data_sets import ModelInput1D, ModelInputSpectrogram, ModelOutputType, DataProcessor
 
 # %% ../nbs/02_models.ipynb 6
-class SleepWakeClassifier(abc.ABC):
+class SleepWakeClassifier:
     """ Abstract class for sleep/wake classifiers. 
     """
-    @abc.abstractmethod
     def __init__(self, model=None, data_processor=None,
                  scaler_pipeline_name: str='scaler', 
                  model_pipeline_name: str='model'):
@@ -114,6 +113,7 @@ def train_pipeline(classifier: SleepWakeClassifier,
 
     Xs = np.concatenate(examples_X, axis=0)
     ys = np.concatenate(examples_y, axis=0)
+    print(f"Training on {len(Xs)} examples")
 
     selector = ys >= 0
 
@@ -127,8 +127,10 @@ def train_pipeline(classifier: SleepWakeClassifier,
     sys.stdout = mystdout = StringIO()
     # multiply ys by selector, to zero-out the "-1" masked values but leave the others unchanged (where selector == 1)
     classifier.pipeline.fit(Xs, ys * selector, **train_kwargs) # Fit the model
+    print("Done fitting")
     sys.stdout = old_stdout
     loss_history = mystdout.getvalue()
+    print(loss_history)
     # Get loss
     try:
         for line in loss_history.split('\n'):
@@ -170,18 +172,18 @@ class SGDLinearClassifier(SleepWakeClassifier):
     The model is trained with a balanced class weight, and uses L1 regularization. The input data is scaled with a `StandardScaler` before being passed to the model.
     """
     def __init__(self, 
-                 data_processor: DataProcessor, 
+                 data_processor: DataProcessor | None = None, 
                  linear_model: LinearModel=LinearModel.LOGISTIC_REGRESSION,
                  **kwargs):
+        if data_processor is not None:
+            if not isinstance(data_processor.model_input, ModelInput1D):
+                raise ValueError("Model input must be set to 1D on the data processor")
+            if not data_processor.output_type == ModelOutputType.SLEEP_WAKE:
+                raise ValueError("Model output must be set to SleepWake on the data processor")
         super().__init__(
             model=SGDClassifier(loss=linear_model.value, **kwargs),
             data_processor=data_processor
         )
-        if not isinstance(data_processor.model_input, ModelInput1D):
-            raise ValueError("Model input must be set to 1D on the data processor")
-        if not data_processor.output_type == ModelOutputType.SLEEP_WAKE:
-            raise ValueError("Model output must be set to SleepWake on the data processor")
-        self.data_processor = data_processor
 
     def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         return self.data_processor.get_1D_X_y(id)
@@ -190,16 +192,16 @@ class SGDLinearClassifier(SleepWakeClassifier):
 class RandomForest(SleepWakeClassifier):
     """Interface for sklearn's RandomForestClassifier"""
     def __init__(self,
-                 data_processor: DataProcessor,
+                 data_processor: DataProcessor | None = None,
                  class_weight: str = 'balanced',
                  **kwargs):
+        if data_processor is not None:
+            if not isinstance(data_processor.model_input, ModelInput1D):
+                raise ValueError("Model input must be set to 1D on the data processor")
         super().__init__(
             model=RandomForestClassifier(class_weight=class_weight, **kwargs),
             data_processor=data_processor
         )
-        if not isinstance(data_processor.model_input, ModelInput1D):
-            raise ValueError("Model input must be set to 1D on the data processor")
-        self.data_processor = data_processor
 
     def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         return self.data_processor.get_1D_X_y(id)
@@ -209,8 +211,9 @@ class MOResUNetPretrained(SleepWakeClassifier):
 
     def __init__(
         self,
-        data_processor: DataProcessor,
-        model: keras.Model = None,
+        data_processor: DataProcessor | None = None,
+        model: keras.Model | None = None,
+        lazy_model_loading: bool = True,
         initial_lr: float = 1e-5,
         validation_split: float = 0.1,
         epochs: int = 10,
@@ -220,26 +223,30 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Initialize the MOResUNetPretrained classifier.
 
         Args:
-            data_processor (DataProcessor): The data processor to use.
+            data_processor (DataProcessor, optional): The data processor to use.
             model (keras.Model, optional): The TensorFlow model to use. Defaults to None, in which case the model is loaded from disk.
         """
-        if model is None:
+        if data_processor is not None:
+            if not isinstance(data_processor.model_input, ModelInputSpectrogram):
+                raise ValueError("Model input must be set to Spectrogram on the data processor")
+
+        if model is None and not lazy_model_loading:
             tf_model = load_saved_keras()
         else:
             tf_model = model
 
-        if not isinstance(data_processor.model_input, ModelInputSpectrogram):
-            raise ValueError("Model input must be set to Spectrogram on the data processor")
 
         super().__init__(
             model=tf_model,
             data_processor=data_processor,
         )
-        self.model.compile(
-            optimizer=keras.optimizers.RMSprop(learning_rate=initial_lr), 
-            loss=keras.losses.SparseCategoricalCrossentropy(),
-            metrics=[keras.metrics.SparseCategoricalAccuracy()],
-            weighted_metrics=[])
+
+        if self.model is not None:
+            self.model.compile(
+                optimizer=keras.optimizers.RMSprop(learning_rate=initial_lr), 
+                loss=keras.losses.SparseCategoricalCrossentropy(),
+                metrics=[keras.metrics.SparseCategoricalAccuracy()],
+                weighted_metrics=[])
         
         # set up training params using the named step format of a pipeline.fit **kwargs
         self.training_params = {
@@ -289,42 +296,14 @@ class MOResUNetPretrained(SleepWakeClassifier):
                     executor.map(
                         self.get_needed_X_y,
                         ids,
+                        repeat(self.data_processor),
                     ), total=len(ids), desc="Preparing data..."
                 ))
 
         return results
 
-    def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
-        return self.data_processor.get_spectrogram_X_y(id)
-
-    # def train(self, 
-    #           examples_X: List[pl.DataFrame] = [], 
-    #           examples_y: List[pl.DataFrame] = [], 
-    #           pairs_Xy: List[Tuple[pl.DataFrame, pl.DataFrame]] = [], 
-    #           lr: float = 1e-5, ):
-    #     """
-    #     Trains the associated Keras model.
-    #     """
-    #     if examples_X or examples_y:
-    #         assert len(examples_X) == len(examples_y)
-    #     if pairs_Xy:
-    #         assert not examples_X
-
-    #     Xs = [X for X, _, _ in examples_X] \
-    #         if examples_X else [X for X, _ in pairs_Xy]
-    #     ys = [y for _, y, _ in examples_y] \
-    #         if examples_y else [y for _, y in pairs_Xy]
-    #     Xs_c = np.concatenate(Xs, axis=0)
-    #     ys_c = np.concatenate(ys, axis=0)
-    #     weights = ys_c >= 0
-
-    #     # Calculate class weights
-
-    #     fit_result = self.model.fit(
-    #         Xs_c, ys_c * weights, batch_size=batch_size, epochs=epochs,
-    #         sample_weight=weights, validation_split=validation_split,)
-
-    #     return fit_result
+    def get_needed_X_y(self, id: str, data_processor: DataProcessor) -> Tuple[np.ndarray, np.ndarray] | None:
+        return data_processor.get_spectrogram_X_y(id)
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
@@ -396,12 +375,17 @@ def run_split(train_indices,
               swc: SleepWakeClassifier,
               epochs: int) -> SleepWakeClassifier:
     training_pairs = [
-        preprocessed_data_set[i][0]
+        [preprocessed_data_set[i][0][0], preprocessed_data_set[i][0][1].reshape(1, -1)]
         for i in train_indices
         if preprocessed_data_set[i][0] is not None
     ]
     if isinstance(swc, MOResUNetPretrained):
-        result = swc.train(pairs_Xy=training_pairs, epochs=epochs)
+        extra_params = {
+            f'{swc.model_pipeline_name}__epochs': epochs,
+            f'{swc.model_pipeline_name}__batch_size': 1,
+            f'{swc.model_pipeline_name}__validation_split': 0.1
+        }
+        result = swc.train(pairs_Xy=training_pairs, **extra_params)
     else:
         result = swc.train(pairs_Xy=training_pairs)
 
