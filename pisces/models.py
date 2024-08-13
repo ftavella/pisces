@@ -25,6 +25,7 @@ from .mads_olsen_support import *
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import LeaveOneOut
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score, roc_curve
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.ensemble import RandomForestClassifier
 from .mads_olsen_support import load_saved_keras
@@ -227,6 +228,9 @@ class MOResUNetPretrained(SleepWakeClassifier):
         else:
             tf_model = model
 
+        if not isinstance(data_processor.model_input, ModelInputSpectrogram):
+            raise ValueError("Model input must be set to Spectrogram on the data processor")
+
         super().__init__(
             model=tf_model,
             data_processor=data_processor,
@@ -262,9 +266,6 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Returns:
             List[Tuple[np.ndarray, np.ndarray] | None]: A list of tuples, where each tuple is the result of `get_needed_X_y` for a given ID. An empty list indicates an error occurred during processing.
         """
-        if not isinstance(self.data_processor.model_input, ModelInputSpectrogram):
-            raise ValueError("Model input must be set to Spectrogram on the data processor")
-
         results = []
         
         # Get the number of available CPU cores
@@ -277,7 +278,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
             workers_to_use = num_cores + max_workers
         if workers_to_use < 1:
             # do this check second, NOT with elif, to verify we're still in a valid state
-            raise ValueError(f"With `max_workers` == {max_workers}, we end up with max_workers + num_cores ({max_workers} + {num_cores}) which is less than 1. This is an error.")
+            raise ValueError(f"With `max_workers` == {max_workers}, we end up with f{max_workers + num_cores} ({max_workers} + {num_cores}) which is less than 1. This is an error.")
 
         print(f"Using {workers_to_use} of {num_cores} cores ({int(100 * workers_to_use / num_cores)}%) for parallel preprocessing.")
         print(f"This can cause memory or heat issues if  is too high; if you run into problems, call prepare_set_for_training() again with max_workers = -1, going more negative if needed. (See the docstring for more info.)")
@@ -287,7 +288,6 @@ class MOResUNetPretrained(SleepWakeClassifier):
                 tqdm(
                     executor.map(
                         self.get_needed_X_y,
-                        repeat(self.data_processor),
                         ids,
                     ), total=len(ids), desc="Preparing data..."
                 ))
@@ -349,7 +349,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         mo_preprocessed_data = [
             (d, i) 
             for (d, i) in zip(
-                self.prepare_set_for_training(self.data_processor, filtered_ids, max_workers=max_workers),
+                self.prepare_set_for_training(filtered_ids, max_workers=max_workers),
                 filtered_ids) 
             if d is not None
         ]
