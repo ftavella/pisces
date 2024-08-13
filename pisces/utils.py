@@ -91,10 +91,10 @@ def build_ADS(
     except AssertionError:
         raise data_shape_error
 
-    time_data_raw = time_xyz[:, 0]
-    x_accel = time_xyz[:, 1]
-    y_accel = time_xyz[:, 2]
-    z_accel = time_xyz[:, 3]
+    time_data_raw = time_xyz[:, 0].to_numpy()
+    x_accel = time_xyz[:, 1].to_numpy()
+    y_accel = time_xyz[:, 2].to_numpy()
+    z_accel = time_xyz[:, 3].to_numpy()
 
     # Interpolate to sampling Hz
     time_values = np.arange(
