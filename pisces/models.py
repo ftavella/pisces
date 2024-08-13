@@ -74,35 +74,58 @@ class SleepWakeClassifier(abc.ABC):
 def train_pipeline(classifier: SleepWakeClassifier,
                    examples_X: List[np.ndarray]=[],
                    examples_y: List[np.ndarray]=[],
-                   pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[]):
+                   pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[],
+                   **train_kwargs) -> List[float]:
     """
     Assumes data is already preprocessed using `get_needed_X_y` 
     and ready to be passed to the classifier.
 
     Returns the loss history of the model.
+
+    Parameters
+    ----------
+    classifier : SleepWakeClassifier
+        The classifier object.
+    examples_X : List[np.ndarray]
+        List of input examples. If non-empty, then `examples_y` must also be provided and must have the same length.
+    examples_y : List[np.ndarray]
+        List of target labels. If non-empty, then `examples_X` must also be provided and must have the same length.
+    pairs_Xy : List[Tuple[np.ndarray, np.ndarray]]
+        List of input-target pairs. If non-empty, then `examples_X` and `examples_y` must not be provided.
+
+    Returns
+    -------
+    List[float]
+        The loss history of the model.
     """
-    if (examples_X and not examples_y) or (examples_y and not examples_X):
-        raise ValueError("If providing examples, must provide both X and y")
-    else:
-        if examples_X and examples_y:
-            assert len(examples_X) == len(examples_y)
     if pairs_Xy:
-        assert not examples_X
+        assert (not examples_X) and (not examples_y)
         examples_X = [pair[0] for pair in pairs_Xy]
         examples_y = [pair[1] for pair in pairs_Xy]
+    elif examples_X and not examples_y: 
+        raise ValueError("Provided examples_X but not examples_y")
+    elif examples_y and not examples_X:
+        raise ValueError("Provided examples_y but not examples_X")
+    else:
+        # we know that examples_X and examples_y are both truthy, hence non-empty lists
+        assert (len(examples_X) == len(examples_y))
 
 
     Xs = np.concatenate(examples_X, axis=0)
     ys = np.concatenate(examples_y, axis=0)
 
     selector = ys >= 0
-    Xs = Xs[selector]
-    ys = ys[selector]
+
+    # adds "model__sample_weight" to train_kwargs, but if it already exists, it will not overwrite it
+    # the order of the dictionaries in | important, as the rightmost dictionary will overwrite the leftmost
+    train_kwargs = {classifier.model_pipeline_name + '__sample_weight': selector} \
+        | train_kwargs
 
     loss_list = []
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
-    classifier.pipeline.fit(Xs, ys) # Fit the model
+    # multiply ys by selector, to zero-out the "-1" masked values but leave the others unchanged (where selector == 1)
+    classifier.pipeline.fit(Xs, ys * selector, **train_kwargs) # Fit the model
     sys.stdout = old_stdout
     loss_history = mystdout.getvalue()
     # Get loss
@@ -121,6 +144,7 @@ def train_pipeline(classifier: SleepWakeClassifier,
 def train(self, examples_X: List[np.ndarray]=[], 
           examples_y: List[np.ndarray]=[], 
           pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[],
+          **training_kwargs
           ):
     """
     Assumes data is already preprocessed using `get_needed_X_y` 
@@ -128,7 +152,7 @@ def train(self, examples_X: List[np.ndarray]=[],
 
     Returns the loss history of the model.
     """
-    loss_list = train_pipeline(self, examples_X, examples_y, pairs_Xy)
+    loss_list = train_pipeline(self, examples_X, examples_y, pairs_Xy, **training_kwargs)
     return loss_list
 
 # %% ../nbs/02_models.ipynb 10
@@ -181,13 +205,15 @@ class RandomForest(SleepWakeClassifier):
 
 # %% ../nbs/02_models.ipynb 15
 class MOResUNetPretrained(SleepWakeClassifier):
-    tf_model = load_saved_keras()
-    config = MO_PREPROCESSING_CONFIG
 
     def __init__(
         self,
         data_processor: DataProcessor,
         model: keras.Model = None,
+        initial_lr: float = 1e-5,
+        validation_split: float = 0.1,
+        epochs: int = 10,
+        batch_size: int = 1,
         **kwargs) -> None:
         """
         Initialize the MOResUNetPretrained classifier.
@@ -205,6 +231,22 @@ class MOResUNetPretrained(SleepWakeClassifier):
             model=tf_model,
             data_processor=data_processor,
         )
+        self.model.compile(
+            optimizer=keras.optimizers.RMSprop(learning_rate=initial_lr), 
+            loss=keras.losses.SparseCategoricalCrossentropy(),
+            metrics=[keras.metrics.SparseCategoricalAccuracy()],
+            weighted_metrics=[])
+        
+        # set up training params using the named step format of a pipeline.fit **kwargs
+        self.training_params = {
+            f'{self.model_pipeline_name}__validation_split': validation_split,
+            f'{self.model_pipeline_name}__epochs': epochs,
+            f'{self.model_pipeline_name}__batch_size': batch_size
+        }
+
+        self.pipeline = Pipeline([
+            (self.model_pipeline_name, self.model)
+        ])
 
     def prepare_set_for_training(self, 
                                  ids: List[str],
@@ -255,56 +297,34 @@ class MOResUNetPretrained(SleepWakeClassifier):
     def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         return self.data_processor.get_spectrogram_X_y(id)
 
-    def train(self, 
-              examples_X: List[pl.DataFrame] = [], 
-              examples_y: List[pl.DataFrame] = [], 
-              pairs_Xy: List[Tuple[pl.DataFrame, pl.DataFrame]] = [], 
-              lr: float = 1e-5, validation_split: float = 0.1,
-              epochs: int = 10, batch_size: int = 1,):
-        """
-        Trains the associated Keras model.
-        """
-        if examples_X or examples_y:
-            assert len(examples_X) == len(examples_y)
-        if pairs_Xy:
-            assert not examples_X
+    # def train(self, 
+    #           examples_X: List[pl.DataFrame] = [], 
+    #           examples_y: List[pl.DataFrame] = [], 
+    #           pairs_Xy: List[Tuple[pl.DataFrame, pl.DataFrame]] = [], 
+    #           lr: float = 1e-5, ):
+    #     """
+    #     Trains the associated Keras model.
+    #     """
+    #     if examples_X or examples_y:
+    #         assert len(examples_X) == len(examples_y)
+    #     if pairs_Xy:
+    #         assert not examples_X
 
-        training = []
-        training_iterator = iter(pairs_Xy) if pairs_Xy else zip(examples_X, examples_y)
-        for X, y in training_iterator:
-            try:
-                y_reshaped = np.pad(
-                    y.reshape(1, -1), 
-                    pad_width=[
-                        (0, 0), # axis 0, no padding
-                        (0, N_OUT - y.shape[0]), # axis 1, pad to N_OUT from mads_olsen_support
-                    ],
-                    mode='constant', 
-                    constant_values=0) 
-                sample_weights = y_reshaped >= 0
-                training.append((X, y_reshaped, sample_weights))
-            except Exception as e:
-                print(f"Error folding or trimming data: {e}")
-                continue
+    #     Xs = [X for X, _, _ in examples_X] \
+    #         if examples_X else [X for X, _ in pairs_Xy]
+    #     ys = [y for _, y, _ in examples_y] \
+    #         if examples_y else [y for _, y in pairs_Xy]
+    #     Xs_c = np.concatenate(Xs, axis=0)
+    #     ys_c = np.concatenate(ys, axis=0)
+    #     weights = ys_c >= 0
 
-        Xs = [X for X, _, _ in training]
-        ys = [y for _, y, _ in training]
-        weights = [w for _, _, w in training]
-        Xs_c = np.concatenate(Xs, axis=0)
-        ys_c = np.concatenate(ys, axis=0)
-        weights = np.concatenate(weights, axis=0)
+    #     # Calculate class weights
 
-        self.model.compile(
-            optimizer=keras.optimizers.RMSprop(learning_rate=lr), 
-            loss=keras.losses.SparseCategoricalCrossentropy(),
-            metrics=[keras.metrics.SparseCategoricalAccuracy()],
-            weighted_metrics=[])
+    #     fit_result = self.model.fit(
+    #         Xs_c, ys_c * weights, batch_size=batch_size, epochs=epochs,
+    #         sample_weight=weights, validation_split=validation_split,)
 
-        fit_result = self.model.fit(
-            Xs_c, ys_c * weights, batch_size=batch_size, epochs=epochs,
-            sample_weight=weights, validation_split=validation_split,)
-
-        return fit_result
+    #     return fit_result
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
