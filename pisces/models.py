@@ -25,16 +25,16 @@ from .mads_olsen_support import *
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import LeaveOneOut
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score, roc_curve
 from concurrent.futures import ProcessPoolExecutor
 from sklearn.ensemble import RandomForestClassifier
 from .mads_olsen_support import load_saved_keras
 from .data_sets import ModelInput1D, ModelInputSpectrogram, ModelOutputType, DataProcessor
 
 # %% ../nbs/02_models.ipynb 6
-class SleepWakeClassifier(abc.ABC):
+class SleepWakeClassifier:
     """ Abstract class for sleep/wake classifiers. 
     """
-    @abc.abstractmethod
     def __init__(self, model=None, data_processor=None,
                  scaler_pipeline_name: str='scaler', 
                  model_pipeline_name: str='model'):
@@ -74,37 +74,63 @@ class SleepWakeClassifier(abc.ABC):
 def train_pipeline(classifier: SleepWakeClassifier,
                    examples_X: List[np.ndarray]=[],
                    examples_y: List[np.ndarray]=[],
-                   pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[]):
+                   pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[],
+                   **train_kwargs) -> List[float]:
     """
     Assumes data is already preprocessed using `get_needed_X_y` 
     and ready to be passed to the classifier.
 
     Returns the loss history of the model.
+
+    Parameters
+    ----------
+    classifier : SleepWakeClassifier
+        The classifier object.
+    examples_X : List[np.ndarray]
+        List of input examples. If non-empty, then `examples_y` must also be provided and must have the same length.
+    examples_y : List[np.ndarray]
+        List of target labels. If non-empty, then `examples_X` must also be provided and must have the same length.
+    pairs_Xy : List[Tuple[np.ndarray, np.ndarray]]
+        List of input-target pairs. If non-empty, then `examples_X` and `examples_y` must not be provided.
+
+    Returns
+    -------
+    List[float]
+        The loss history of the model.
     """
-    if (examples_X and not examples_y) or (examples_y and not examples_X):
-        raise ValueError("If providing examples, must provide both X and y")
-    else:
-        if examples_X and examples_y:
-            assert len(examples_X) == len(examples_y)
     if pairs_Xy:
-        assert not examples_X
+        assert (not examples_X) and (not examples_y)
         examples_X = [pair[0] for pair in pairs_Xy]
         examples_y = [pair[1] for pair in pairs_Xy]
+    elif examples_X and not examples_y: 
+        raise ValueError("Provided examples_X but not examples_y")
+    elif examples_y and not examples_X:
+        raise ValueError("Provided examples_y but not examples_X")
+    else:
+        # we know that examples_X and examples_y are both truthy, hence non-empty lists
+        assert (len(examples_X) == len(examples_y))
 
 
     Xs = np.concatenate(examples_X, axis=0)
     ys = np.concatenate(examples_y, axis=0)
+    print(f"Training on {len(Xs)} examples")
 
     selector = ys >= 0
-    Xs = Xs[selector]
-    ys = ys[selector]
+
+    # adds "model__sample_weight" to train_kwargs, but if it already exists, it will not overwrite it
+    # the order of the dictionaries in | important, as the rightmost dictionary will overwrite the leftmost
+    train_kwargs = {classifier.model_pipeline_name + '__sample_weight': selector} \
+        | train_kwargs
 
     loss_list = []
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
-    classifier.pipeline.fit(Xs, ys) # Fit the model
+    # multiply ys by selector, to zero-out the "-1" masked values but leave the others unchanged (where selector == 1)
+    classifier.pipeline.fit(Xs, ys * selector, **train_kwargs) # Fit the model
+    print("Done fitting")
     sys.stdout = old_stdout
     loss_history = mystdout.getvalue()
+    print(loss_history)
     # Get loss
     try:
         for line in loss_history.split('\n'):
@@ -121,6 +147,7 @@ def train_pipeline(classifier: SleepWakeClassifier,
 def train(self, examples_X: List[np.ndarray]=[], 
           examples_y: List[np.ndarray]=[], 
           pairs_Xy: List[Tuple[np.ndarray, np.ndarray]]=[],
+          **training_kwargs
           ):
     """
     Assumes data is already preprocessed using `get_needed_X_y` 
@@ -128,7 +155,7 @@ def train(self, examples_X: List[np.ndarray]=[],
 
     Returns the loss history of the model.
     """
-    loss_list = train_pipeline(self, examples_X, examples_y, pairs_Xy)
+    loss_list = train_pipeline(self, examples_X, examples_y, pairs_Xy, **training_kwargs)
     return loss_list
 
 # %% ../nbs/02_models.ipynb 10
@@ -145,18 +172,18 @@ class SGDLinearClassifier(SleepWakeClassifier):
     The model is trained with a balanced class weight, and uses L1 regularization. The input data is scaled with a `StandardScaler` before being passed to the model.
     """
     def __init__(self, 
-                 data_processor: DataProcessor, 
+                 data_processor: DataProcessor | None = None, 
                  linear_model: LinearModel=LinearModel.LOGISTIC_REGRESSION,
                  **kwargs):
+        if data_processor is not None:
+            if not isinstance(data_processor.model_input, ModelInput1D):
+                raise ValueError("Model input must be set to 1D on the data processor")
+            if not data_processor.output_type == ModelOutputType.SLEEP_WAKE:
+                raise ValueError("Model output must be set to SleepWake on the data processor")
         super().__init__(
             model=SGDClassifier(loss=linear_model.value, **kwargs),
             data_processor=data_processor
         )
-        if not isinstance(data_processor.model_input, ModelInput1D):
-            raise ValueError("Model input must be set to 1D on the data processor")
-        if not data_processor.output_type == ModelOutputType.SLEEP_WAKE:
-            raise ValueError("Model output must be set to SleepWake on the data processor")
-        self.data_processor = data_processor
 
     def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         return self.data_processor.get_1D_X_y(id)
@@ -165,46 +192,72 @@ class SGDLinearClassifier(SleepWakeClassifier):
 class RandomForest(SleepWakeClassifier):
     """Interface for sklearn's RandomForestClassifier"""
     def __init__(self,
-                 data_processor: DataProcessor,
+                 data_processor: DataProcessor | None = None,
                  class_weight: str = 'balanced',
                  **kwargs):
+        if data_processor is not None:
+            if not isinstance(data_processor.model_input, ModelInput1D):
+                raise ValueError("Model input must be set to 1D on the data processor")
         super().__init__(
             model=RandomForestClassifier(class_weight=class_weight, **kwargs),
             data_processor=data_processor
         )
-        if not isinstance(data_processor.model_input, ModelInput1D):
-            raise ValueError("Model input must be set to 1D on the data processor")
-        self.data_processor = data_processor
 
     def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         return self.data_processor.get_1D_X_y(id)
 
 # %% ../nbs/02_models.ipynb 15
 class MOResUNetPretrained(SleepWakeClassifier):
-    tf_model = load_saved_keras()
-    config = MO_PREPROCESSING_CONFIG
 
     def __init__(
         self,
-        data_processor: DataProcessor,
-        model: keras.Model = None,
+        data_processor: DataProcessor | None = None,
+        model: keras.Model | None = None,
+        lazy_model_loading: bool = True,
+        initial_lr: float = 1e-5,
+        validation_split: float = 0.1,
+        epochs: int = 10,
+        batch_size: int = 1,
         **kwargs) -> None:
         """
         Initialize the MOResUNetPretrained classifier.
 
         Args:
-            data_processor (DataProcessor): The data processor to use.
+            data_processor (DataProcessor, optional): The data processor to use.
             model (keras.Model, optional): The TensorFlow model to use. Defaults to None, in which case the model is loaded from disk.
         """
-        if model is None:
+        if data_processor is not None:
+            if not isinstance(data_processor.model_input, ModelInputSpectrogram):
+                raise ValueError("Model input must be set to Spectrogram on the data processor")
+
+        if model is None and not lazy_model_loading:
             tf_model = load_saved_keras()
         else:
             tf_model = model
+
 
         super().__init__(
             model=tf_model,
             data_processor=data_processor,
         )
+
+        if self.model is not None:
+            self.model.compile(
+                optimizer=keras.optimizers.RMSprop(learning_rate=initial_lr), 
+                loss=keras.losses.SparseCategoricalCrossentropy(),
+                metrics=[keras.metrics.SparseCategoricalAccuracy()],
+                weighted_metrics=[])
+        
+        # set up training params using the named step format of a pipeline.fit **kwargs
+        self.training_params = {
+            f'{self.model_pipeline_name}__validation_split': validation_split,
+            f'{self.model_pipeline_name}__epochs': epochs,
+            f'{self.model_pipeline_name}__batch_size': batch_size
+        }
+
+        self.pipeline = Pipeline([
+            (self.model_pipeline_name, self.model)
+        ])
 
     def prepare_set_for_training(self, 
                                  ids: List[str],
@@ -220,9 +273,6 @@ class MOResUNetPretrained(SleepWakeClassifier):
         Returns:
             List[Tuple[np.ndarray, np.ndarray] | None]: A list of tuples, where each tuple is the result of `get_needed_X_y` for a given ID. An empty list indicates an error occurred during processing.
         """
-        if not isinstance(self.data_processor.model_input, ModelInputSpectrogram):
-            raise ValueError("Model input must be set to Spectrogram on the data processor")
-
         results = []
         
         # Get the number of available CPU cores
@@ -235,7 +285,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
             workers_to_use = num_cores + max_workers
         if workers_to_use < 1:
             # do this check second, NOT with elif, to verify we're still in a valid state
-            raise ValueError(f"With `max_workers` == {max_workers}, we end up with max_workers + num_cores ({max_workers} + {num_cores}) which is less than 1. This is an error.")
+            raise ValueError(f"With `max_workers` == {max_workers}, we end up with f{max_workers + num_cores} ({max_workers} + {num_cores}) which is less than 1. This is an error.")
 
         print(f"Using {workers_to_use} of {num_cores} cores ({int(100 * workers_to_use / num_cores)}%) for parallel preprocessing.")
         print(f"This can cause memory or heat issues if  is too high; if you run into problems, call prepare_set_for_training() again with max_workers = -1, going more negative if needed. (See the docstring for more info.)")
@@ -245,66 +295,15 @@ class MOResUNetPretrained(SleepWakeClassifier):
                 tqdm(
                     executor.map(
                         self.get_needed_X_y,
-                        repeat(self.data_processor),
                         ids,
+                        repeat(self.data_processor),
                     ), total=len(ids), desc="Preparing data..."
                 ))
 
         return results
 
-    def get_needed_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
-        return self.data_processor.get_spectrogram_X_y(id)
-
-    def train(self, 
-              examples_X: List[pl.DataFrame] = [], 
-              examples_y: List[pl.DataFrame] = [], 
-              pairs_Xy: List[Tuple[pl.DataFrame, pl.DataFrame]] = [], 
-              lr: float = 1e-5, validation_split: float = 0.1,
-              epochs: int = 10, batch_size: int = 1,):
-        """
-        Trains the associated Keras model.
-        """
-        if examples_X or examples_y:
-            assert len(examples_X) == len(examples_y)
-        if pairs_Xy:
-            assert not examples_X
-
-        training = []
-        training_iterator = iter(pairs_Xy) if pairs_Xy else zip(examples_X, examples_y)
-        for X, y in training_iterator:
-            try:
-                y_reshaped = np.pad(
-                    y.reshape(1, -1), 
-                    pad_width=[
-                        (0, 0), # axis 0, no padding
-                        (0, N_OUT - y.shape[0]), # axis 1, pad to N_OUT from mads_olsen_support
-                    ],
-                    mode='constant', 
-                    constant_values=0) 
-                sample_weights = y_reshaped >= 0
-                training.append((X, y_reshaped, sample_weights))
-            except Exception as e:
-                print(f"Error folding or trimming data: {e}")
-                continue
-
-        Xs = [X for X, _, _ in training]
-        ys = [y for _, y, _ in training]
-        weights = [w for _, _, w in training]
-        Xs_c = np.concatenate(Xs, axis=0)
-        ys_c = np.concatenate(ys, axis=0)
-        weights = np.concatenate(weights, axis=0)
-
-        self.model.compile(
-            optimizer=keras.optimizers.RMSprop(learning_rate=lr), 
-            loss=keras.losses.SparseCategoricalCrossentropy(),
-            metrics=[keras.metrics.SparseCategoricalAccuracy()],
-            weighted_metrics=[])
-
-        fit_result = self.model.fit(
-            Xs_c, ys_c * weights, batch_size=batch_size, epochs=epochs,
-            sample_weight=weights, validation_split=validation_split,)
-
-        return fit_result
+    def get_needed_X_y(self, id: str, data_processor: DataProcessor) -> Tuple[np.ndarray, np.ndarray] | None:
+        return data_processor.get_spectrogram_X_y(id)
 
     def predict(self, sample_X: np.ndarray | pl.DataFrame) -> np.ndarray:
         return np.argmax(self.predict_probabilities(sample_X), axis=1)
@@ -329,7 +328,7 @@ class MOResUNetPretrained(SleepWakeClassifier):
         mo_preprocessed_data = [
             (d, i) 
             for (d, i) in zip(
-                self.prepare_set_for_training(self.data_processor, filtered_ids, max_workers=max_workers),
+                self.prepare_set_for_training(filtered_ids, max_workers=max_workers),
                 filtered_ids) 
             if d is not None
         ]
@@ -376,12 +375,17 @@ def run_split(train_indices,
               swc: SleepWakeClassifier,
               epochs: int) -> SleepWakeClassifier:
     training_pairs = [
-        preprocessed_data_set[i][0]
+        [preprocessed_data_set[i][0][0], preprocessed_data_set[i][0][1].reshape(1, -1)]
         for i in train_indices
         if preprocessed_data_set[i][0] is not None
     ]
     if isinstance(swc, MOResUNetPretrained):
-        result = swc.train(pairs_Xy=training_pairs, epochs=epochs)
+        extra_params = {
+            f'{swc.model_pipeline_name}__epochs': epochs,
+            f'{swc.model_pipeline_name}__batch_size': 1,
+            f'{swc.model_pipeline_name}__validation_split': 0.1
+        }
+        result = swc.train(pairs_Xy=training_pairs, **extra_params)
     else:
         result = swc.train(pairs_Xy=training_pairs)
 
