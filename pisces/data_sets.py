@@ -19,7 +19,7 @@ from enum import Enum, auto
 from functools import partial
 from collections import defaultdict
 from typing import Dict, List, Tuple
-from .mads_olsen_support import *
+from .deep_unet_support import *
 from typing import DefaultDict, Iterable
 from scipy.ndimage import gaussian_filter1d
 from .utils import determine_header_rows_and_delimiter
@@ -247,17 +247,44 @@ class DataSetObject:
         self.ids: List[str] = []
 
         # keeps track of the files for each feature and user
+        # eg:
+        # {
+        #     'psg': {
+        #         '001': '001_psg.csv',
+        #         '002': '002_psg.csv',
+        #     },
+        #     'eeg': {
+        #         '001': '001_eeg.csv',
+        #         '002': '002_eeg.csv',
+        #     }
+        # }
         self._feature_map: DefaultDict[str, Dict[str, str]] = defaultdict(dict)
+        # mirrors the structure of _feature_map, but stores the dataframes instead of file names
         self._feature_cache: DefaultDict[str, Dict[str, pl.DataFrame]] = defaultdict(dict)
     
     @property
     def features(self) -> List[str]:
-        return list(self._feature_map.keys())
+        # unique union of features cache and map, since sometimes these get out of sync.
+        # eg when making a new data set in code, assigning dataframes.
+        return list(
+            set(
+                list(self._feature_cache.keys()) 
+                + list(self._feature_map.keys())))
     
     def __str__(self):
         return f"{self.name}: {self.path}"
+    
+    def drop_feature_data(self, feature: str, id: str):
+        if feature not in self.features:
+            warnings.warn(f"Feature {feature} not found in {self.name}.")
+        self._feature_cache[feature].pop(id, None)
 
-    def get_feature_data(self, feature: str, id: str) -> pl.DataFrame | None:
+    def get_feature_data(
+            self,
+            feature: str,
+            id: str,
+            keep_in_memory: bool = True  # should the data be kept in memory? Setting to False is useful when processing large datasets, so the data is discarded once loaded for processing.
+            ) -> pl.DataFrame | None:
         if feature not in self.features:
             warnings.warn(f"Feature {feature} not found in {self.name}. Returning None.")
             return None
@@ -280,7 +307,8 @@ class DataSetObject:
                 return None
             # sort by time when loading
             df.sort(df.columns[0])
-            self._feature_cache[feature][id] = df
+            if keep_in_memory:
+                self._feature_cache[feature][id] = df
         return df
 
     def get_filename(self, feature: str, id: str) -> Path | None:
@@ -335,6 +363,7 @@ class DataSetObject:
     @classmethod
     def find_data_sets(cls, 
                        root: str | Path,
+                       try_parse: bool = True
                        ) -> Dict[str, 'DataSetObject']:
         root = str(root).replace("\\", "/") # Use consistent separators
 
@@ -352,14 +381,19 @@ class DataSetObject:
                     data_sets[data_set.name] = data_set
                 else:
                     data_sets[data_set_name]._feature_map[feature_name] = {}
+        if try_parse:
+            for data_set in data_sets.values():
+                data_set.parse_data()
         return data_sets
 
-    def parse_data_sets(self, 
+    def parse_data(self, 
                         ignore_startswith: List=["."], # Ignore files starting with these strings 
                         ignore_endswith: List=[".tmp"], # Ignore files ending with these strings 
                         id_templates: Dict[str, str] | str | None=None, # The template for extracting IDs from the file names. A template per feature can be provided as a dictionary 
                         id_symbol: str="<<ID>>",
                         ):
+        """Analyzes the files found within a data set and extracts the IDs and file names for each feature. If your data set appears to have no data or `.ids` is empty, you probably need to call this function on the set.
+        """
         for feature in self.features:
             feature_path = self.get_feature_path(feature)
             if not feature_path.exists():
@@ -383,7 +417,7 @@ class DataSetObject:
         self,
         features: List[str], # List of features included in the calculation, typically a combination of input and output features
         id: str, # Subject id to process
-        ) -> Tuple[int, int]:
+        ) -> Tuple[int | None, int | None]:
         '''
         Find common time interval when there's data for all features
         '''
@@ -391,6 +425,8 @@ class DataSetObject:
         min_end = None
         for feature in features:
             data = self.get_feature_data(feature, id)
+            if data is None:
+                return (None, None)
             time = data[:, 0]
             if max_start is None:
                 max_start = time.min()
@@ -401,8 +437,30 @@ class DataSetObject:
             else:
                 min_end = min([min_end, time.max()])
         return (max_start, min_end)
+    
+    def set_feature_data(self, feature: str, id: str, data: pl.DataFrame):
+        self._feature_cache[feature][id] = data
+    
+    def save_feature_data(self, feature: str, id: str, path: Path):
+        data = self.get_feature_data(feature, id)
+        if data is None:
+            warnings.warn(f"No data found for {feature} and {id}")
+            return
+        data.write_csv(path)
+    
+    def save_set(self, path: Path):
+        path.mkdir(parents=True, exist_ok=True)
+        for feature in self.features:
+            feature_path = path.joinpath(self.FEATURE_PREFIX + feature)
+            feature_path.mkdir(parents=True, exist_ok=True)
+            for id in self.ids:
+                data = self.get_feature_data(feature, id)
+                if data is None:
+                    warnings.warn(f"No data found for {feature} and {id}")
+                    continue
+                data.write_csv(feature_path.joinpath(f"{id}.csv"))
 
-# %% ../nbs/01_data_sets.ipynb 13
+# %% ../nbs/01_data_sets.ipynb 14
 def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
     """
     * map all positive classes to 1 (sleep)
@@ -439,7 +497,7 @@ def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
     If N4 is False:
         - 1, 2 => 1 (light sleep)
         - 3 => 2 (deep sleep)
-        - 5 => 3 (REM)
+        - 4 => 3 (REM)
     * retain all 0 (wake) and -1 (mask) classes
     """
     return vec_to_WLDM(psg[:, 1].to_numpy(), N4)
@@ -503,7 +561,108 @@ class ModelInputSpectrogram(ModelInput):
         self.input_sampling_hz = float(input_sampling_hz)
         self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
 
-# %% ../nbs/01_data_sets.ipynb 17
+# %% ../nbs/01_data_sets.ipynb 19
+def psg_to_sleep_wake(psg: pl.DataFrame) -> np.ndarray:
+    """
+    * map all positive classes to 1 (sleep)
+    * retain all 0 (wake) and -1 (mask) classes
+    """
+    return np.where(psg[:, 1] > 0, 1, psg[:, 1])
+
+def to_WLDM(x: float, N4: bool=True) -> int:
+    """
+    Map sleep stages to wake, light, deep, and REM sleep.
+    Retain masked values. If N4 stage is not present,
+    PSG=4 is mapped to REM. Otherwise it is mapped to deep sleep.
+    """
+    if x < 0:
+        return -1
+    if x == 0:
+        return 0
+    if x < 3:
+        return 1
+    rem_value = 5 if N4 else 4
+    if x < rem_value:
+        return 2
+    return 3
+
+vec_to_WLDM = np.vectorize(to_WLDM)
+
+def psg_to_WLDM(psg: pl.DataFrame, N4: bool = True) -> np.ndarray:
+    """
+    * map all positive classes as follows:
+    If N4 is True:
+        - 1, 2 => 1 (light sleep)
+        - 3, 4 => 2 (deep sleep)
+        - 5 => 3 (REM)
+    If N4 is False:
+        - 1, 2 => 1 (light sleep)
+        - 3 => 2 (deep sleep)
+        - 5 => 3 (REM)
+    * retain all 0 (wake) and -1 (mask) classes
+    """
+    return vec_to_WLDM(psg[:, 1].to_numpy(), N4)
+
+# %% ../nbs/01_data_sets.ipynb 22
+class ModelOutputType(Enum):
+    SLEEP_WAKE = auto()
+    WAKE_LIGHT_DEEP_REM = auto()
+
+class PSGType(Enum):
+    NO_N4 = auto()
+    HAS_N4 = auto()
+
+class ModelInput:
+    def __init__(self,
+                 input_features: List[str] | str,
+                 input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
+                 ):
+        # input_features
+        if isinstance(input_features, str):
+            input_features = [input_features]
+        self.input_features = input_features
+        # input_sampling_hz
+        if not isinstance(input_sampling_hz, (int, float)):
+            raise ValueError("input_sampling_hz must be an int or a float")
+        else:
+            if input_sampling_hz <= 0:
+                raise ValueError("input_sampling_hz must be greater than 0")
+        self.input_sampling_hz = float(input_sampling_hz)
+
+class ModelInput1D(ModelInput):
+    def __init__(self,
+                 input_features: List[str] | str,
+                 input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
+                 input_window_time: int | float, # Window size (in seconds) for the input data. Window will be centered around the time point for which the model is making a prediction
+                 ):
+        super().__init__(input_features, input_sampling_hz)
+        # input_window_time
+        if not isinstance(input_window_time, (int, float)):
+            raise ValueError("input_window_time must be an int or a float")
+        else:
+            if input_window_time <= 0:
+                raise ValueError("input_window_time must be greater than 0")
+
+        self.input_window_time = float(input_window_time)
+        # Number of samples for the input window of a single feature
+        self.input_window_samples = int(self.input_window_time * self.input_sampling_hz)
+        ## force it to be odd to have perfectly centered window
+        if self.input_window_samples % 2 == 0:
+            self.input_window_samples += 1
+        # Dimension of the input data for the model
+        self.model_input_dimension = int(len(input_features) * self. input_window_samples)
+
+class ModelInputSpectrogram(ModelInput):
+    def __init__(self,
+                 input_features: List[str] | str,
+                 input_sampling_hz: int | float, # Sampling rate of the input data (1/s)
+                 spectrogram_preprocessing_config: Dict=MO_PREPROCESSING_CONFIG, # Steps in the preprocessing pipeline for getting a spectrogram from acceleration
+                 ):
+        super().__init__(input_features, input_sampling_hz)
+        self.input_sampling_hz = float(input_sampling_hz)
+        self.spectrogram_preprocessing_config = spectrogram_preprocessing_config
+
+# %% ../nbs/01_data_sets.ipynb 23
 def get_sample_weights(y: np.ndarray) -> np.ndarray:
      """
      Calculate sample weights based on the distribution of classes in the data.
@@ -611,7 +770,7 @@ def fill_gaps_in_accelerometer_data(acc: pl.DataFrame, smooth: bool = False, fin
 
     return acc_resampled
 
-# %% ../nbs/01_data_sets.ipynb 18
+# %% ../nbs/01_data_sets.ipynb 24
 class DataProcessor:
     def __init__(self,
                  data_set: DataSetObject,
@@ -695,44 +854,50 @@ class DataProcessor:
     def get_1D_X_y(self, id: str) -> Tuple[np.ndarray, np.ndarray] | None:
         # Find overlapping time section
         all_features = self.input_features + [self.output_feature]
-        max_start, min_end = self.data_set.find_overlapping_time_section(all_features, id)
-        # Get labels
-        labels = self.get_labels(id, max_start, min_end, self.output_feature)
-        label_times = labels[:, 0]
-        epoch_start = label_times.min() + self.input_window_time / 2.0
-        epoch_end = label_times.max() - self.input_window_time / 2.0
-        filtered_labels = labels.filter(labels[:, 0] >= epoch_start)
-        filtered_labels = filtered_labels.filter(filtered_labels[:, 0] <= epoch_end)
-        epoch_times = filtered_labels[:, 0]
-        # Get input data
-        interpolation_timestamps = np.arange(max_start, 
-                                             min_end + 1.0/self.input_sampling_hz,
-                                             1.0/self.input_sampling_hz,)
-        # Interpolate all data to the same time points
-        interpolated_features = []
-        for feature in self.input_features:
-            data = self.data_set.get_feature_data(feature, id)
-            feature_times = data[:, 0]
-            for i in range(1, data.shape[1]):
-                feature_values = data[:, i]
-                X_feature = self.get_1D_X_for_feature(interpolation_timestamps, 
-                                                        epoch_times, feature_times, 
-                                                        feature_values)
-                interpolated_features.append(X_feature)
-        # Concatenate input features alongside the first dimension
-        X = np.concatenate(interpolated_features, axis=1)
-        y = filtered_labels[:, 1].to_numpy()
-        return X, y
+        try:
+            max_start, min_end = self.data_set.find_overlapping_time_section(all_features, id)
+            # Get labels
+            labels = self.get_labels(id, max_start, min_end, self.output_feature)
+            label_times = labels[:, 0]
+            epoch_start = label_times.min() + self.input_window_time / 2.0
+            epoch_end = label_times.max() - self.input_window_time / 2.0
+            filtered_labels = labels.filter(labels[:, 0] >= epoch_start)
+            filtered_labels = filtered_labels.filter(filtered_labels[:, 0] <= epoch_end)
+            epoch_times = filtered_labels[:, 0]
+            # Get input data
+            interpolation_timestamps = np.arange(max_start, 
+                                                min_end + 1.0/self.input_sampling_hz,
+                                                1.0/self.input_sampling_hz,)
+            # Interpolate all data to the same time points
+            interpolated_features = []
+            for feature in self.input_features:
+                data = self.data_set.get_feature_data(feature, id)
+                feature_times = data[:, 0]
+                for i in range(1, data.shape[1]):
+                    feature_values = data[:, i]
+                    X_feature = self.get_1D_X_for_feature(interpolation_timestamps, 
+                                                            epoch_times, feature_times, 
+                                                            feature_values)
+                    interpolated_features.append(X_feature)
+            # Concatenate input features alongside the first dimension
+            X = np.concatenate(interpolated_features, axis=1)
+            y = filtered_labels[:, 1].to_numpy()
+            return X, y
+        except Exception as e:
+            warnings.warn(f"Error processing data for {id}:\n{e}")
+            return (None, None)
     
-    def accelerometer_to_spectrogram(self, accelerometer: pl.DataFrame) -> np.ndarray:
+    def accelerometer_to_spectrogram(self, accelerometer: pl.DataFrame | np.ndarray) -> np.ndarray:
         """
         Implementation by Mads Olsen at https://github.com/MADSOLSEN/SleepStagePrediction
         with minor modifications.
         """
         if isinstance(accelerometer, pl.DataFrame):
             acc = accelerometer.to_numpy()
+        elif isinstance(accelerometer, np.ndarray):
+            acc = accelerometer
         else:
-            raise ValueError("accelerometer must be a polars DataFrame")
+            raise ValueError("accelerometer must be a numpy array or polars DataFrame")
 
         x_ = acc[:, 1]
         y_ = acc[:, 2]
